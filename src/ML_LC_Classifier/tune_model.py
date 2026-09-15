@@ -1,19 +1,91 @@
 """Hyperparameter tuning and held-out evaluation for classifiers."""
 
 from dataclasses import dataclass
-from typing import Any, Mapping
-
+from typing import Any, Mapping, Protocol, cast
 import numpy as np
+from lightgbm import LGBMClassifier
 from sklearn.base import BaseEstimator
-from sklearn.metrics import (
-	accuracy_score,
-	balanced_accuracy_score,
-	classification_report,
-	confusion_matrix,
-	f1_score,
-)
-from sklearn.model_selection import RandomizedSearchCV
+from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
+from sklearn.metrics import (accuracy_score,balanced_accuracy_score,classification_report,confusion_matrix,f1_score,)
+from sklearn.model_selection import BaseCrossValidator, GridSearchCV, RandomizedSearchCV
 
+
+Classifier = str | BaseEstimator
+
+
+class ClassifierModel(Protocol):
+	"""Minimal fitted-classifier interface required for evaluation."""
+
+	def predict(self, X: np.ndarray) -> np.ndarray:
+		...
+
+
+def build_classifier(
+	classifier: str,
+	*,
+	n_jobs: int | None = -1,
+	random_state: int = 42,
+) -> BaseEstimator:
+	"""Build one of the classifiers supported by the package."""
+	name = classifier.lower().replace(" ", "").replace("-", "").replace("_", "")
+	if name in {"randomforest", "rf"}:
+		return RandomForestClassifier(random_state=random_state, n_jobs=n_jobs)
+	if name == "extratrees":
+		return ExtraTreesClassifier(random_state=random_state, n_jobs=n_jobs)
+	if name in {"xgboost", "xgb"}:
+		try:
+			from xgboost import XGBClassifier
+		except ImportError as error:
+			raise ImportError(
+				"XGBoost support requires the optional dependency: pip install "
+				"ml-lc-classifier[boosting]"
+			) from error
+		return XGBClassifier(random_state=random_state, n_jobs=n_jobs)
+	if name in {"lightgbm", "lgbm"}:
+		return cast(
+			BaseEstimator,
+			LGBMClassifier(random_state=random_state, n_jobs=n_jobs, verbosity=-1),
+		)
+	raise ValueError(
+		f"Unsupported classifier {classifier!r}. Choose RandomForest, ExtraTrees, "
+		"XGBoost, LightGBM, or pass a scikit-learn estimator."
+	)
+
+
+def _make_search(
+	search_method: str,
+	estimator: BaseEstimator,
+	parameter_space: Mapping[str, Any],
+	*,
+	n_iter: int,
+	cv: int | BaseCrossValidator,
+	scoring: str,
+	n_jobs: int | None,
+	random_state: int,
+	verbose: int,
+	return_train_score: bool,
+) -> Any:
+	common: dict[str, Any] = dict(
+		estimator=estimator,
+		cv=cv,
+		scoring=scoring,
+		n_jobs=n_jobs,
+		verbose=verbose,
+		return_train_score=return_train_score,
+	)
+	method = search_method.lower()
+	if method == "grid":
+		return GridSearchCV(**common, param_grid=dict(parameter_space))
+	if method in {"random", "randomized"}:
+		if n_iter < 1:
+			raise ValueError("n_iter must be at least 1")
+		return RandomizedSearchCV(
+			**common,
+			param_distributions=dict(parameter_space),
+			n_iter=n_iter,
+			random_state=random_state,
+		)
+	raise ValueError("search_method must be 'random' or 'grid'")
 
 @dataclass
 class ModelTuningResult:
@@ -22,7 +94,7 @@ class ModelTuningResult:
 	model: BaseEstimator
 	best_params: dict[str, Any]
 	best_score: float
-	search: RandomizedSearchCV
+	search: Any
 
 
 @dataclass
@@ -35,40 +107,63 @@ class ModelEvaluation:
 
 
 def tune_model(
-	estimator: BaseEstimator,
-	param_distributions: Mapping[str, Any],
-	X_train: np.ndarray,
-	y_train: np.ndarray,
+	estimator: Classifier | None = None,
+	param_distributions: Mapping[str, Any] | None = None,
+	X_train: np.ndarray | None = None,
+	y_train: np.ndarray | None = None,
 	*,
+	classifier: str | None = None,
+	parameter_space: Mapping[str, Any] | None = None,
+	search_method: str = "random",
 	n_iter: int = 20,
-	cv: int | Any = 5,
+	cv: int | BaseCrossValidator = 5,
 	scoring: str = "balanced_accuracy",
 	n_jobs: int | None = -1,
 	random_state: int = 42,
 	verbose: int = 0,
 	return_train_score: bool = False,
 ) -> ModelTuningResult:
-	"""Tune any scikit-learn-compatible classifier with randomized search.
+	"""Tune a named or custom classifier with grid or randomized search.
 
-	``estimator`` may be a Random Forest, XGBoost, LightGBM, or another
-	classifier implementing the scikit-learn estimator interface. The caller
-	supplies parameter names and candidate values or scipy distributions.
+	Use ``classifier="RandomForest"`` (or ``"ExtraTrees"``, ``"XGBoost"``,
+	``"LightGBM"``) to let this package construct the estimator. Supply
+	parameter names and candidate values through ``parameter_space``. The
+	``param_distributions`` name remains a backwards-compatible alias, and
+	passing an estimator directly is also supported.
 	The returned model is fitted on all training samples using the best
 	parameters; the test set must be evaluated separately with
 	:func:`evaluate_model`.
 	"""
+	if X_train is None or y_train is None:
+		raise ValueError("X_train and y_train are required")
 	if X_train.ndim != 2 or y_train.ndim != 1:
 		raise ValueError("X_train must be 2-D and y_train must be 1-D")
 	if len(X_train) != len(y_train):
 		raise ValueError("X_train and y_train must contain the same number of samples")
 	if X_train.shape[1] == 0:
 		raise ValueError("X_train must contain at least one feature")
-	if n_iter < 1:
-		raise ValueError("n_iter must be at least 1")
+	if classifier is not None and estimator is not None:
+		raise ValueError("Provide either classifier or estimator, not both")
+	if parameter_space is not None and param_distributions is not None:
+		raise ValueError("Provide either parameter_space or param_distributions, not both")
+	parameter_space = parameter_space or param_distributions
+	if parameter_space is None:
+		raise ValueError("parameter_space is required")
+	if classifier is not None:
+		estimator = build_classifier(
+			classifier, n_jobs=n_jobs, random_state=random_state
+		)
+	elif estimator is None:
+		raise ValueError("Provide classifier or estimator")
+	elif isinstance(estimator, str):
+		estimator = build_classifier(
+			estimator, n_jobs=n_jobs, random_state=random_state
+		)
 
-	search = RandomizedSearchCV(
+	search = _make_search(
+		search_method=search_method,
 		estimator=estimator,
-		param_distributions=dict(param_distributions),
+		parameter_space=parameter_space,
 		n_iter=n_iter,
 		cv=cv,
 		scoring=scoring,
@@ -76,7 +171,6 @@ def tune_model(
 		random_state=random_state,
 		verbose=verbose,
 		return_train_score=return_train_score,
-		refit=True,
 	)
 	search.fit(X_train, y_train)
 
@@ -89,7 +183,7 @@ def tune_model(
 
 
 def evaluate_model(
-	model: BaseEstimator,
+	model: ClassifierModel,
 	X_test: np.ndarray,
 	y_test: np.ndarray,
 	*,
@@ -108,12 +202,15 @@ def evaluate_model(
 		"f1_macro": float(f1_score(y_test, predictions, average="macro")),
 		"f1_weighted": float(f1_score(y_test, predictions, average="weighted")),
 	}
-	report = classification_report(
-		y_test,
-		predictions,
-		labels=labels,
-		output_dict=True,
-		zero_division=0,
+	report = cast(
+		dict[str, Any],
+		classification_report(
+			y_test,
+			predictions,
+			labels=labels,
+			output_dict=True,
+			zero_division=0,
+		),
 	)
 	matrix = confusion_matrix(y_test, predictions, labels=labels)
 	return ModelEvaluation(
