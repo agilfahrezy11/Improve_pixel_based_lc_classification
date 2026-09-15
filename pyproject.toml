@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ml-lc-classifier"
+version = "0.1.0"
+description = "Pixel-based land-cover classification workflow"
+requires-python = ">=3.10"
+dependencies = [
+    "geopandas",
+    "numpy",
+    "pandas",
+    "rasterio",
+    "scikit-learn",
+    "lightgbm",
+]
+
+[project.optional-dependencies]
+boosting = [
+    "xgboost",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
