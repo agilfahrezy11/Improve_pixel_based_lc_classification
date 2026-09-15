@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import rasterio
 from rasterio.mask import mask as rio_mask
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedShuffleSplit
 
 
 Path = str | PathLike[str]
@@ -113,10 +113,20 @@ def train_test_split_data(
     test_size: float = 0.3,
     random_state: int = 42,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Stratified train/test split (mirrors the single-model notebook)."""
-    x_train, x_test, y_train, y_test = train_test_split(
-        features, labels, test_size=test_size, stratify=labels, random_state=random_state
+    """Create one reproducible stratified shuffle train/test split."""
+    if features.ndim != 2 or labels.ndim != 1 or len(features) != len(labels):
+        raise ValueError("features must be 2-D and labels 1-D with matching lengths")
+
+    splitter = StratifiedShuffleSplit(
+        n_splits=1,
+        test_size=test_size,
+        random_state=random_state,
     )
+    train_indices, test_indices = next(splitter.split(features, labels))
+    x_train = features[train_indices]
+    x_test = features[test_indices]
+    y_train = labels[train_indices]
+    y_test = labels[test_indices]
     return x_train, x_test, y_train, y_test
 
 
