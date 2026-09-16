@@ -1,5 +1,6 @@
 """Reusable land-cover training-data utilities."""
 
+from .classify_raster import classify_raster
 from .feature_elimination import FeatureSelectionResult, select_features
 from .load_extract import (
     class_distribution,
@@ -11,13 +12,21 @@ from .load_extract import (
     open_raster,
     train_test_split_data,
 )
-from .tune_model import ModelEvaluation, ModelTuningResult, evaluate_model, tune_model
+from .tune_model import (
+    ModelEvaluation,
+    ModelTuningResult,
+    build_classifier,
+    evaluate_model,
+    tune_model,
+)
 
 __all__ = [
     "FeatureSelectionResult",
     "ModelEvaluation",
     "ModelTuningResult",
+    "build_classifier",
     "class_distribution",
+    "classify_raster",
     "drop_nan_samples",
     "extract_pixels_from_shapefile",
     "load_and_extract",
