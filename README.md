@@ -1,6 +1,6 @@
-# ML Land-Cover Classifier
+# Pixel Based Supervised Classification for Land Cover Mapping
 
-A Python toolkit for pixel-based land-cover classification utilizing machine learning classiifer. It extracts labeled pixels from a multi-stack raster and training samples, optionally selects features, tunes a various machine learning classifier, evaluates the model, and writes a classified GeoTIFF.
+A Python toolkit for land-cover classification utilizing machine learning classiifer. It extracts labeled pixels from a multi-stack raster and training samples, optionally selects features, tunes a various machine learning classifier, evaluates the model, and writes a classified GeoTIFF.
 
 ## Features
 
