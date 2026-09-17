@@ -1,5 +1,11 @@
-"""Load raster training data, extract labeled pixels, and split the samples."""
+"""
+Feature Extraction Module
+This module provides functions to load raster and vector data, extract pixel values from polygons, clean the data, 
+and split it into training and testing sets. It is designed for use in land cover classification tasks.
 
+"""
+
+#required Library
 from os import PathLike
 from typing import Any, Tuple
 import geopandas as gpd
@@ -11,17 +17,17 @@ from sklearn.model_selection import StratifiedShuffleSplit
 
 
 Path = str | PathLike[str]
-
+#load raster file, just define the path
 def open_raster(raster_path: Path):
     """Open a raster with rasterio and return the dataset handle (caller keeps it open)."""
     return rasterio.open(raster_path)
 
-
+#load the trining samples, define the path of the shapefile
 def load_training_samples(shapefile_path: Path) -> "gpd.GeoDataFrame":
     """Load a training-sample shapefile (or any OGR vector format) as a GeoDataFrame."""
     return gpd.read_file(shapefile_path)
 
-
+#xtract the raster feature from shapefile
 def extract_pixels_from_shapefile(
     shapefile: "gpd.GeoDataFrame",
     raster: Any,
@@ -70,7 +76,7 @@ def extract_pixels_from_shapefile(
     labels = np.asarray([sample[1] for sample in training_samples])
     return features, labels
 
-
+#drop invalid samples
 def drop_nan_samples(features: np.ndarray, labels: np.ndarray
                       ) -> Tuple[np.ndarray, np.ndarray]:
     """Remove samples with non-finite features or missing labels."""
@@ -82,12 +88,12 @@ def drop_nan_samples(features: np.ndarray, labels: np.ndarray
     valid_samples = valid_features & valid_labels
     return features[valid_samples], labels[valid_samples]
 
-
+#sample distrnbution of the samples
 def class_distribution(labels: np.ndarray, name: str = "class") -> pd.DataFrame:
     """Simple value_counts table, handy for sanity-checking sample balance."""
     return pd.DataFrame({name: labels})[name].value_counts().to_frame()
 
-
+#wrapper function to execute the aforementioned functions
 def load_and_extract(
     raster_path: Path,
     shapefile_path: Path,
@@ -107,6 +113,8 @@ def load_and_extract(
     features, labels = drop_nan_samples(features, labels)
     return dataset, features, labels
 
+#perform train and test split on the extracted samples
+#use stratified shuffle split to ensure class distribution is preserved
 def train_test_split_data(
     features: np.ndarray,
     labels: np.ndarray,

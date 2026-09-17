@@ -1,5 +1,10 @@
-"""Recursive feature elimination for raster-derived training samples."""
+"""
+Feature Elimination Module 
 
+This module provides functions to perform Recursive Feature Elimination with Cross Validation (RFECV) for selecting optimal features from the input feature stack, 
+
+
+"""
 from dataclasses import dataclass
 from typing import Any, Sequence
 import numpy as np
@@ -7,7 +12,7 @@ from sklearn.base import BaseEstimator
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import RFECV
 
-
+#class for orchestrating feature selection and store the result
 @dataclass
 class FeatureSelectionResult:
 	"""Fitted feature selector and the data selected by it."""
@@ -16,13 +21,12 @@ class FeatureSelectionResult:
 	X_test: Any
 	selected_indices: np.ndarray
 	selected_features: list[Any]
-
 	@property
 	def n_features(self) -> int:
 		"""Return the number of features retained by RFECV."""
 		return int(self.selector.n_features_)
-
-
+#main function for feature selection
+#implement the Recursive Feature Elimination with Cross-Validation (RFECV)
 def select_features(
 	X_train: np.ndarray,
 	y_train: np.ndarray,
@@ -37,7 +41,6 @@ def select_features(
 	n_jobs: int | None = -1,
 ) -> FeatureSelectionResult:
 	"""Select an optimum feature subset using recursive feature elimination.
-
 	RFECV is fitted only with ``X_train`` and ``y_train``. If supplied,
 	``X_test`` is transformed after fitting and is never used during feature
 	selection. The fitted selector should be retained for raster prediction.
@@ -58,11 +61,11 @@ def select_features(
 
 	if estimator is None:
 		estimator = RandomForestClassifier(
-			n_estimators=200,
+			n_estimators=300,
 			random_state=42,
 			n_jobs=n_jobs,
 		)
-
+	#Main RFECV implementation
 	selector = RFECV(
 		estimator=estimator,
 		step=step,
@@ -71,19 +74,18 @@ def select_features(
 		scoring=scoring,
 		n_jobs=n_jobs,
 	)
+	#fit the selector
 	selector.fit(X_train, y_train)
-
 	selected_indices = np.flatnonzero(selector.support_)
 	selected_features = (
 		[feature_names[int(index)] for index in selected_indices]
 		if feature_names is not None
 		else selected_indices.tolist()
 	)
-
+	#return the selected features
 	return FeatureSelectionResult(
 		selector=selector,
 		X_train=selector.transform(X_train),
 		X_test=selector.transform(X_test) if X_test is not None else None,
 		selected_indices=selected_indices,
-		selected_features=selected_features,
-	)
+		selected_features=selected_features,)

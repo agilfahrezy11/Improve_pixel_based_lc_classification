@@ -3,7 +3,6 @@
 from os import PathLike
 from pathlib import Path
 from typing import Any
-
 import numpy as np
 import rasterio
 from rasterio.windows import Window
@@ -57,7 +56,7 @@ def classify_raster(
 				height = min(block_size, source.height - row_start)
 				for column_start in range(0, source.width, block_size):
 					width = min(block_size, source.width - column_start)
-					window = Window(column_start, row_start, width, height)
+					window = Window(column_start, row_start, width, height) # type: ignore
 					block = source.read(window=window, masked=True)
 
 					pixels = np.ma.getdata(block).reshape(source.count, -1).T

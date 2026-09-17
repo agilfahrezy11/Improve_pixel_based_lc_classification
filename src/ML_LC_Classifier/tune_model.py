@@ -1,24 +1,31 @@
-"""Hyperparameter tuning and held-out evaluation for classifiers."""
+"""
+Model Hyperparameter Tuning and Evaluation
 
+This module provides function to tune the hyperparameters of a classifier using grid or randomized search.
+Additionally, it provides functionality to evaluate the performance of the fitter model. Supported Classifiers are as follows:
+- Random Forest
+- Extreme Gradient Boosting (XGBoost)
+- Extremely Randomized Trees (ExtraTrees/ERT)
+- Light Gradient Boosting Machine (LGBM)
+
+More algorithms can be added by passing a scikit-learn compatible estimator to the ``tune_model`` function.
+"""
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, cast
 import numpy as np
 from lightgbm import LGBMClassifier
 from sklearn.base import BaseEstimator
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
-from sklearn.metrics import (accuracy_score,balanced_accuracy_score,classification_report,confusion_matrix,f1_score,)
+from sklearn.metrics import accuracy_score,balanced_accuracy_score,classification_report,confusion_matrix,f1_score
 from sklearn.model_selection import BaseCrossValidator, GridSearchCV, RandomizedSearchCV
 
-
 Classifier = str | BaseEstimator
-
 
 class ClassifierModel(Protocol):
 	"""Minimal fitted-classifier interface required for evaluation."""
 
 	def predict(self, X: np.ndarray) -> np.ndarray:
 		...
-
 
 def build_classifier(
 	classifier: str,
