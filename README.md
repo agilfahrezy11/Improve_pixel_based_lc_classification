@@ -108,7 +108,6 @@ input_data/              Local input-data location (ignored by Git)
 output/                  Local predictions (ignored by Git)
 ```
 
-`src/end-to-end-ml.py` is an earlier exploratory script with machine-specific paths. Prefer the package API above or adapt it to your environment before running it.
 
 ## Main API
 
