@@ -20,6 +20,10 @@ dependencies = [
 boosting = [
     "xgboost",
 ]
+planetary-computer = [
+    "planetary-computer",
+    "pystac-client",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

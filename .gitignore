@@ -1,6 +1,5 @@
 /src/ML_LC_Classifier/__pycache__
 /.kiro
-/.input_data
-/.output
+/input_data
 /output
 /src/ml_lc_classifier.egg-info
