@@ -48,16 +48,20 @@ def detect_outliers_per_class(
     feature_cols: list[str],
     class_col: str = "class_label",
     id_col: str = "point_id",
+    class_name_col: str | None = None,
     method: str = "isolation_forest",   # or "elliptic_envelope"
     contamination: float = 0.05,        # expected outlier fraction per class
     min_points_for_ee: int = 30,        # EllipticEnvelope needs a reasonable sample
 ) -> pd.DataFrame:
     """
     Runs outlier detection independently within each class.
-    Returns a DataFrame with point_id, class_label, outlier (bool), score.
+    Returns a DataFrame with identifiers, class label/name, outlier (bool),
+    and score.
     Higher score = more anomalous.
     """
     required_cols = [id_col, class_col, *feature_cols]
+    if class_name_col is not None:
+        required_cols.append(class_name_col)
     missing_cols = [column for column in required_cols if column not in df.columns]
     if missing_cols:
         raise ValueError(f"Missing required columns: {missing_cols}")
@@ -101,6 +105,8 @@ def detect_outliers_per_class(
             "score": score,
             "n_in_class": n,
         })
+        if class_name_col is not None:
+            out.insert(2, class_name_col, group[class_name_col].tolist())
         results.append(out)
 
     return pd.concat(results, ignore_index=True).sort_values(
@@ -131,11 +137,52 @@ def remove_outliers(
     return df.loc[~df[id_col].isin(flagged_ids)].copy().reset_index(drop=True)
 
 
+def remove_outliers_from_vector(
+    points: "object",
+    flags: pd.DataFrame,
+    id_col: str = "point_id",
+    outlier_col: str = "outlier",
+) -> "object":
+    """Return a GeoDataFrame with flagged point geometries removed."""
+    import geopandas as gpd
+
+    if not isinstance(points, gpd.GeoDataFrame):
+        raise TypeError("points must be a GeoDataFrame")
+    return remove_outliers(
+        points,
+        flags,
+        id_col=id_col,
+        outlier_col=outlier_col,
+    )
+
+
+def save_cleaned_points(
+    points_path: str | PathLike[str],
+    flags: pd.DataFrame,
+    output_path: str | PathLike[str],
+    id_col: str = "point_id",
+    outlier_col: str = "outlier",
+    driver: str = "ESRI Shapefile",
+) -> None:
+    """Remove flagged points from a vector file and write the cleaned file."""
+    import geopandas as gpd
+
+    points = gpd.read_file(points_path)
+    cleaned_points = remove_outliers_from_vector(
+        points,
+        flags,
+        id_col=id_col,
+        outlier_col=outlier_col,
+    )
+    cleaned_points.to_file(output_path, driver=driver)
+
+
 def detect_point_outliers(
     raster_path: str | PathLike[str],
     points_path: str | PathLike[str],
     class_field: str,
     id_field: str = "point_id",
+    class_name_field: str | None = "LULC_type",
     method: str = "isolation_forest",
     contamination: float = 0.05,
     min_points_for_ee: int = 30,
@@ -148,15 +195,19 @@ def detect_point_outliers(
         points_path=points_path,
         class_field=class_field,
         id_field=id_field,
+        class_name_field=class_name_field,
     )
     feature_cols = [
-        column for column in samples.columns if column not in {id_field, class_field}
+        column
+        for column in samples.columns
+        if column not in {id_field, class_field, class_name_field}
     ]
     return detect_outliers_per_class(
         samples,
         feature_cols=feature_cols,
         class_col=class_field,
         id_col=id_field,
+        class_name_col=class_name_field,
         method=method,
         contamination=contamination,
         min_points_for_ee=min_points_for_ee,
