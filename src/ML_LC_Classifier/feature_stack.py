@@ -328,13 +328,13 @@ def create_feature_stack(
             destination.set_band_description(number, name)
         for row in range(0, height, block_size):
             for col in range(0, width, block_size):
-                window = Window(col, row, min(block_size, width - col), min(block_size, height - row))
+                window = Window(col, row, min(block_size, width - col), min(block_size, height - row)) # type: ignore
                 # Read a one-pixel halo so terrain derivatives are continuous at
                 # block boundaries; crop it before writing the requested window.
                 halo_col = max(0, col - 1)
                 halo_row = max(0, row - 1)
                 halo = Window(
-                    halo_col,
+                    halo_col, # type: ignore
                     halo_row,
                     min(width - halo_col, int(window.width) + (col - halo_col) + 1),
                     min(height - halo_row, int(window.height) + (row - halo_row) + 1),

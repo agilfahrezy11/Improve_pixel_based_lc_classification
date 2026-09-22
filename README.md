@@ -119,6 +119,28 @@ output/                  Local predictions (ignored by Git)
 | `tune_model` | Run grid or randomized cross-validation search and return the best fitted model. |
 | `evaluate_model` | Calculate held-out classification metrics and a confusion matrix. |
 | `classify_raster` | Predict a single-band classified GeoTIFF from an input feature stack. |
+| `mosaic_rasters` | Merge adjacent or overlapping Earth Engine tile downloads into one GeoTIFF. |
+| `stack_rasters` | Align raster layers and write them as ordered bands in one GeoTIFF. |
+
+For tiled downloads, pass a glob pattern to `mosaic_rasters`. For separate
+bands, pass an ordered list to `stack_rasters`; the list order becomes the
+GeoTIFF band order:
+
+```python
+from ML_LC_Classifier import mosaic_rasters, stack_rasters
+
+mosaic_rasters(
+    "input_data/sentinel2_tiles/*.tif",
+    "input_data/sentinel2_mosaic.tif",
+    method="max",  #ideal for binary masks
+    nodata=0,
+)
+stack_rasters(
+    ["input_data/B04.tif", "input_data/B08.tif"],
+    "input_data/feature_stack.tif",
+    band_names=["B04", "B08"],
+)
+```
 
 ## Optional remote imagery and feature stacks
 
