@@ -7,6 +7,7 @@ from typing import Iterable, Sequence
 import glob
 
 import rasterio
+from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.merge import merge
 from rasterio.vrt import WarpedVRT
@@ -14,7 +15,8 @@ from rasterio.vrt import WarpedVRT
 
 RasterPath = str | PathLike[str]
 
-
+#resolve paths issues 
+#so that glob patterns and iterables of paths are handled consistently
 def _resolve_paths(rasters: Iterable[RasterPath] | str | PathLike[str]) -> list[Path]:
     """Expand a glob or validate an iterable of raster paths."""
     if isinstance(rasters, (str, PathLike)):
@@ -27,8 +29,7 @@ def _resolve_paths(rasters: Iterable[RasterPath] | str | PathLike[str]) -> list[
     if missing:
         raise FileNotFoundError(f"Raster does not exist: {missing[0]}")
     return paths
-
-
+#perform mosaic of rasters
 def mosaic_rasters(
     rasters: Iterable[RasterPath] | str | PathLike[str],
     output_path: RasterPath,
@@ -64,8 +65,7 @@ def mosaic_rasters(
             for band in range(1, destination.count + 1):
                 destination.set_band_description(band, sources[0].descriptions[band - 1] or f"band_{band}")
     return output
-
-
+#perform stacking of raster data
 def stack_rasters(
     rasters: Iterable[RasterPath] | str | PathLike[str],
     output_path: RasterPath,
@@ -92,7 +92,13 @@ def stack_rasters(
         reference = sources[0]
         if reference.crs is None:
             raise ValueError(f"Raster has no CRS: {paths[0]}")
-        crs = target_crs or reference.crs
+        crs = CRS.from_user_input(target_crs or reference.crs)
+        if resolution is not None and crs.is_geographic:
+            raise ValueError(
+                "resolution is expressed in target CRS units. The target CRS "
+                f"{crs} uses degrees; provide a projected target_crs for a "
+                "meter resolution, or omit resolution to preserve the source grid."
+            )
         pixel_size = resolution or max(abs(reference.transform.a), abs(reference.transform.e))
         if target_crs is None and resolution is None:
             transform, width, height = reference.transform, reference.width, reference.height

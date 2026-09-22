@@ -116,6 +116,12 @@ def _grid(path: Path, target_crs: str | None, resolution: float | None) -> tuple
         if source.crs is None:
             raise ValueError(f"Raster has no CRS: {path}")
         crs = target_crs or source.crs
+        if resolution is not None and crs.is_geographic:
+            raise ValueError(
+                "resolution is expressed in target CRS units. The target CRS "
+                f"{crs} uses degrees; provide a projected target_crs for a "
+                "meter resolution, or omit resolution to preserve the source grid."
+            )
         if str(crs) == str(source.crs) and resolution is None:
             return crs, source.transform, source.width, source.height
         west, south, east, north = array_bounds(source.height, source.width, source.transform)

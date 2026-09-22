@@ -43,6 +43,7 @@ def extract_point_features(
     raster: Any,
     class_field: str,
     id_field: str = "point_id",
+    class_name_field: str | None = None,
 ) -> pd.DataFrame:
     """Extract one raster feature row for each labelled point.
 
@@ -50,11 +51,18 @@ def extract_point_features(
     column per raster band. Points outside the raster or containing invalid
     raster values are omitted.
     """
-    for field in (class_field, id_field):
+    required_fields = [class_field, id_field]
+    if class_name_field is not None:
+        required_fields.append(class_name_field)
+    for field in required_fields:
         if field not in points.columns:
             raise ValueError(f"Field {field!r} was not found in the training data")
 
     feature_names = _raster_feature_names(raster)
+    output_columns = [id_field, class_field]
+    if class_name_field is not None:
+        output_columns.append(class_name_field)
+    output_columns.extend(feature_names)
     rows = []
     for _, row in points.iterrows():
         geometry = row.geometry
@@ -62,7 +70,9 @@ def extract_point_features(
             continue
         if geometry.geom_type != "Point":
             raise ValueError("Point-level extraction requires Point geometries")
-        if pd.isna(row[class_field]):
+        if pd.isna(row[class_field]) or (
+            class_name_field is not None and pd.isna(row[class_name_field])
+        ):
             continue
 
         values = next(raster.sample([(geometry.x, geometry.y)], masked=True))
@@ -70,15 +80,16 @@ def extract_point_features(
         if np.ma.getmaskarray(values).any() or not np.isfinite(values.data).all():
             continue
 
-        rows.append(
-            {
-                id_field: row[id_field],
-                class_field: row[class_field],
-                **dict(zip(feature_names, values.data.tolist())),
-            }
-        )
+        point_values = {
+            id_field: row[id_field],
+            class_field: row[class_field],
+            **dict(zip(feature_names, values.data.tolist())),
+        }
+        if class_name_field is not None:
+            point_values[class_name_field] = row[class_name_field]
+        rows.append(point_values)
 
-    return pd.DataFrame(rows, columns=[id_field, class_field, *feature_names])
+    return pd.DataFrame(rows, columns=output_columns)
 
 #xtract the raster feature from shapefile
 def extract_pixels_from_shapefile(
@@ -172,6 +183,7 @@ def load_and_extract_points(
     points_path: Path,
     class_field: str,
     id_field: str = "point_id",
+    class_name_field: str | None = None,
 ) -> pd.DataFrame:
     """Load point labels and raster values as a tidy outlier-detection table."""
     with open_raster(raster_path) as dataset:
@@ -183,6 +195,7 @@ def load_and_extract_points(
             dataset,
             class_field=class_field,
             id_field=id_field,
+            class_name_field=class_name_field,
         )
 
 #perform train and test split on the extracted samples

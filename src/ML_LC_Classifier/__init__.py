@@ -4,7 +4,14 @@ from .classify_raster import classify_raster
 from .feature_stack import FeatureStackResult, create_feature_stack
 from .raster_mosaic_stack import mosaic_rasters, stack_rasters
 from .feature_elimination import FeatureSelectionResult, select_features
-from .outlier_detection import detect_outliers_per_class, detect_point_outliers, load_points
+from .outlier_detection import (
+    detect_outliers_per_class,
+    detect_point_outliers,
+    load_points,
+    remove_outliers,
+    remove_outliers_from_vector,
+    save_cleaned_points,
+)
 from .load_extract import (
     class_distribution,
     drop_nan_samples,
@@ -55,6 +62,9 @@ __all__ = [
     "load_and_extract_points",
     "load_and_split_training_data",
     "load_points",
+    "remove_outliers",
+    "remove_outliers_from_vector",
+    "save_cleaned_points",
     "load_training_samples",
     "open_raster",
     "preview_imagery",
