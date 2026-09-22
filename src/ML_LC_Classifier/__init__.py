@@ -2,6 +2,7 @@
 
 from .classify_raster import classify_raster
 from .feature_stack import FeatureStackResult, create_feature_stack
+from .raster_mosaic_stack import mosaic_rasters, stack_rasters
 from .feature_elimination import FeatureSelectionResult, select_features
 from .outlier_detection import detect_outliers_per_class, detect_point_outliers, load_points
 from .load_extract import (
@@ -42,6 +43,8 @@ __all__ = [
     "class_distribution",
     "classify_raster",
     "create_feature_stack",
+    "mosaic_rasters",
+    "stack_rasters",
     "detect_outliers_per_class",
     "detect_point_outliers",
     "download_imagery",
