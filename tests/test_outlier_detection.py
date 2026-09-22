@@ -4,7 +4,22 @@ import rasterio
 from rasterio.transform import from_origin
 from shapely.geometry import Point
 
-from ML_LC_Classifier import extract_point_features
+from ML_LC_Classifier import extract_point_features, remove_outliers
+
+
+def test_remove_outliers_returns_clean_copy_without_flagged_points():
+    samples = gpd.GeoDataFrame(
+        {"point_id": ["p1", "p2", "p3"], "class_id": [1, 1, 2]},
+        geometry=[Point(0, 0), Point(1, 1), Point(2, 2)],
+    )
+    flags = gpd.GeoDataFrame(
+        {"point_id": ["p1", "p2"], "outlier": [False, True]},
+    )
+
+    cleaned = remove_outliers(samples, flags)
+
+    assert cleaned["point_id"].tolist() == ["p1", "p3"]
+    assert samples["point_id"].tolist() == ["p1", "p2", "p3"]
 
 
 def test_extract_point_features_preserves_ids_labels_and_band_names(tmp_path):

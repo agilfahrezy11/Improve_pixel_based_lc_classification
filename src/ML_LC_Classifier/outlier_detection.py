@@ -108,6 +108,29 @@ def detect_outliers_per_class(
     )
 
 
+def remove_outliers(
+    df: pd.DataFrame,
+    flags: pd.DataFrame,
+    id_col: str = "point_id",
+    outlier_col: str = "outlier",
+) -> pd.DataFrame:
+    """Return a copy of ``df`` with flagged samples removed.
+
+    The original DataFrame and the detector result are left unchanged. Use the
+    returned table as the cleaned training data after reviewing ``flags``.
+    """
+    for name, table, required in (
+        ("training data", df, [id_col]),
+        ("outlier flags", flags, [id_col, outlier_col]),
+    ):
+        missing = [column for column in required if column not in table.columns]
+        if missing:
+            raise ValueError(f"Missing columns in {name}: {missing}")
+
+    flagged_ids = flags.loc[flags[outlier_col].astype(bool), id_col]
+    return df.loc[~df[id_col].isin(flagged_ids)].copy().reset_index(drop=True)
+
+
 def detect_point_outliers(
     raster_path: str | PathLike[str],
     points_path: str | PathLike[str],
