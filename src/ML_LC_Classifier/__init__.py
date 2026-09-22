@@ -3,11 +3,14 @@
 from .classify_raster import classify_raster
 from .feature_stack import FeatureStackResult, create_feature_stack
 from .feature_elimination import FeatureSelectionResult, select_features
+from .outlier_detection import detect_outliers_per_class, detect_point_outliers, load_points
 from .load_extract import (
     class_distribution,
     drop_nan_samples,
     extract_pixels_from_shapefile,
+    extract_point_features,
     load_and_extract,
+    load_and_extract_points,
     load_and_split_training_data,
     load_training_samples,
     open_raster,
@@ -39,11 +42,16 @@ __all__ = [
     "class_distribution",
     "classify_raster",
     "create_feature_stack",
+    "detect_outliers_per_class",
+    "detect_point_outliers",
     "download_imagery",
     "drop_nan_samples",
     "extract_pixels_from_shapefile",
+    "extract_point_features",
     "load_and_extract",
+    "load_and_extract_points",
     "load_and_split_training_data",
+    "load_points",
     "load_training_samples",
     "open_raster",
     "preview_imagery",

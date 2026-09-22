@@ -27,6 +27,59 @@ def load_training_samples(shapefile_path: Path) -> "gpd.GeoDataFrame":
     """Load a training-sample shapefile (or any OGR vector format) as a GeoDataFrame."""
     return gpd.read_file(shapefile_path)
 
+
+def _raster_feature_names(raster: Any) -> list[str]:
+    """Return stable column names for the bands in an open raster."""
+    names = []
+    for index, description in enumerate(raster.descriptions, start=1):
+        names.append(description or f"band_{index}")
+    if len(set(names)) != len(names):
+        raise ValueError("Raster band descriptions must be unique")
+    return names
+
+
+def extract_point_features(
+    points: "gpd.GeoDataFrame",
+    raster: Any,
+    class_field: str,
+    id_field: str = "point_id",
+) -> pd.DataFrame:
+    """Extract one raster feature row for each labelled point.
+
+    The returned DataFrame contains ``id_field``, ``class_field``, and one
+    column per raster band. Points outside the raster or containing invalid
+    raster values are omitted.
+    """
+    for field in (class_field, id_field):
+        if field not in points.columns:
+            raise ValueError(f"Field {field!r} was not found in the training data")
+
+    feature_names = _raster_feature_names(raster)
+    rows = []
+    for _, row in points.iterrows():
+        geometry = row.geometry
+        if geometry is None or geometry.is_empty:
+            continue
+        if geometry.geom_type != "Point":
+            raise ValueError("Point-level extraction requires Point geometries")
+        if pd.isna(row[class_field]):
+            continue
+
+        values = next(raster.sample([(geometry.x, geometry.y)], masked=True))
+        values = np.ma.asarray(values)
+        if np.ma.getmaskarray(values).any() or not np.isfinite(values.data).all():
+            continue
+
+        rows.append(
+            {
+                id_field: row[id_field],
+                class_field: row[class_field],
+                **dict(zip(feature_names, values.data.tolist())),
+            }
+        )
+
+    return pd.DataFrame(rows, columns=[id_field, class_field, *feature_names])
+
 #xtract the raster feature from shapefile
 def extract_pixels_from_shapefile(
     shapefile: "gpd.GeoDataFrame",
@@ -112,6 +165,25 @@ def load_and_extract(
     features, labels = extract_pixels_from_shapefile(samples, dataset, class_field)
     features, labels = drop_nan_samples(features, labels)
     return dataset, features, labels
+
+
+def load_and_extract_points(
+    raster_path: Path,
+    points_path: Path,
+    class_field: str,
+    id_field: str = "point_id",
+) -> pd.DataFrame:
+    """Load point labels and raster values as a tidy outlier-detection table."""
+    with open_raster(raster_path) as dataset:
+        points = load_training_samples(points_path)
+        if points.crs is not None and dataset.crs is not None and points.crs != dataset.crs:
+            points = points.to_crs(dataset.crs)
+        return extract_point_features(
+            points,
+            dataset,
+            class_field=class_field,
+            id_field=id_field,
+        )
 
 #perform train and test split on the extracted samples
 #use stratified shuffle split to ensure class distribution is preserved
