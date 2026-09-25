@@ -1,7 +1,7 @@
 """
 Outlier detection for labeled LULC training points.
 
-Idea: for each land-cover class, fit an outlier/anomaly detector on the
+Concept: for each land-cover class, fit an outlier/anomaly detector on the
 spectral (+ index/topo) features of points belonging to that class only,
 then flag points that look anomalous relative to their own class.
 Output is a table of point_id + outlier flag + score, so flagged points
@@ -14,20 +14,19 @@ containing at least:
     - band/index columns : e.g. B2, B3, B4, B8, NDVI, ...
 
 Requires: pandas, numpy, scikit-learn (and geopandas if reading a
-vector file with a geometry column).
+vector file with a geometry column). Additionally, training data required to have unique point id
+currently only work with point data, not polygon  
 """
 
 from os import PathLike
-
 import numpy as np
 import pandas as pd
 from sklearn.covariance import EllipticEnvelope
-from sklearn.ensemble import IsolationForest
+from sklearn.ensemble import IsolationForest 
 from sklearn.preprocessing import StandardScaler
 
-# ---------------------------------------------------------------------
-# 1. Load data
-# ---------------------------------------------------------------------
+#1. Load data
+#Read the training data, accept geojson or shapefile
 def load_points(path: str | PathLike[str]) -> pd.DataFrame:
     """Load training points into a DataFrame. Adjust for your file type."""
     path = str(path)
@@ -39,19 +38,17 @@ def load_points(path: str | PathLike[str]) -> pd.DataFrame:
         df = df.drop(columns="geometry", errors="ignore")
     return df
 
-
-# ---------------------------------------------------------------------
-# 2. Per-class outlier detection
-# ---------------------------------------------------------------------
+#2. Per-class outlier detection
+#detect outlier using isolation forest as default approach
 def detect_outliers_per_class(
     df: pd.DataFrame,
     feature_cols: list[str],
     class_col: str = "class_label",
-    id_col: str = "point_id",
+    id_col: str = "point_id", #can be manually define
     class_name_col: str | None = None,
-    method: str = "isolation_forest",   # or "elliptic_envelope"
-    contamination: float = 0.05,        # expected outlier fraction per class
-    min_points_for_ee: int = 30,        # EllipticEnvelope needs a reasonable sample
+    method: str = "isolation_forest",   #or "elliptic_envelope"
+    contamination: float = 0.05,        #expected outlier fraction per class
+    min_points_for_ee: int = 30,        #EllipticEnvelope needs a reasonable sample
 ) -> pd.DataFrame:
     """
     Runs outlier detection independently within each class.
@@ -85,15 +82,15 @@ def detect_outliers_per_class(
             pred = np.ones(n, dtype=int)
             score = np.full(n, np.nan)
         else:
+            #perform scaling to normalized the data
             X_scaled = StandardScaler().fit_transform(X)
-
             if method == "elliptic_envelope" and n >= min_points_for_ee:
-                model = EllipticEnvelope(contamination=contamination, random_state=0)
+                model = EllipticEnvelope(contamination=contamination, random_state=42)
                 pred = model.fit_predict(X_scaled)
                 score = model.mahalanobis(X_scaled)
             else:
                 model = IsolationForest(
-                    contamination=contamination, random_state=0, n_estimators=300
+                    contamination=contamination, random_state=42, n_estimators=300
                 )
                 pred = model.fit_predict(X_scaled)
                 score = -model.score_samples(X_scaled)
@@ -112,8 +109,8 @@ def detect_outliers_per_class(
     return pd.concat(results, ignore_index=True).sort_values(
         ["outlier", "score"], ascending=[False, False]
     )
-
-
+#function to reemove outlier after detection
+#only return csv file
 def remove_outliers(
     df: pd.DataFrame,
     flags: pd.DataFrame,
@@ -136,7 +133,8 @@ def remove_outliers(
     flagged_ids = flags.loc[flags[outlier_col].astype(bool), id_col]
     return df.loc[~df[id_col].isin(flagged_ids)].copy().reset_index(drop=True)
 
-
+#function to perform outlier removal from the training data
+#return cleaned training data vector
 def remove_outliers_from_vector(
     points: "object",
     flags: pd.DataFrame,
@@ -156,6 +154,41 @@ def remove_outliers_from_vector(
     )
 
 
+def flag_outliers_in_vector(
+    points: "object",
+    flags: pd.DataFrame,
+    id_col: str = "point_id",
+    outlier_col: str = "outlier",
+) -> "object":
+    """Return all points with detector results attached as vector columns.
+
+    The input points are preserved in their original order, including points
+    that were not present in ``flags`` because feature extraction skipped them.
+    """
+    import geopandas as gpd
+
+    if not isinstance(points, gpd.GeoDataFrame):
+        raise TypeError("points must be a GeoDataFrame")
+    missing = [
+        column for column in (id_col, outlier_col) if column not in flags.columns
+    ]
+    if missing:
+        raise ValueError(f"Missing columns in outlier flags: {missing}")
+    if flags[id_col].duplicated().any():
+        raise ValueError(f"Outlier flags contain duplicate values in {id_col!r}")
+
+    flag_columns = [column for column in flags.columns if column != id_col]
+    flagged = points.merge(
+        flags[[id_col, *flag_columns]],
+        on=id_col,
+        how="left",
+        sort=False,
+        suffixes=("", "_flag"),
+        validate="one_to_one",
+    )
+    flagged[outlier_col] = flagged[outlier_col].eq(True)
+    return gpd.GeoDataFrame(flagged, geometry=points.geometry.name, crs=points.crs)
+#write the cleaned training data
 def save_cleaned_points(
     points_path: str | PathLike[str],
     flags: pd.DataFrame,
@@ -174,8 +207,28 @@ def save_cleaned_points(
         id_col=id_col,
         outlier_col=outlier_col,
     )
-    cleaned_points.to_file(output_path, driver=driver)
+    cleaned_points.to_file(output_path, driver=driver) # type: ignore
 
+
+def save_flagged_points(
+    points_path: str | PathLike[str],
+    flags: pd.DataFrame,
+    output_path: str | PathLike[str],
+    id_col: str = "point_id",
+    outlier_col: str = "outlier",
+    driver: str = "ESRI Shapefile",
+) -> None:
+    """Write the original vector data with outlier flags and scores attached."""
+    import geopandas as gpd
+
+    points = gpd.read_file(points_path)
+    flagged_points = flag_outliers_in_vector(
+        points,
+        flags,
+        id_col=id_col,
+        outlier_col=outlier_col,
+    )
+    flagged_points.to_file(output_path, driver=driver) # type: ignore
 
 def detect_point_outliers(
     raster_path: str | PathLike[str],
