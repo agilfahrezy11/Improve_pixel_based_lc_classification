@@ -13,7 +13,7 @@ More algorithms can be added by passing a scikit-learn compatible estimator to t
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, cast
 import numpy as np
-from lightgbm import LGBMClassifier
+from lightgbm import LGBMClassifier #LIGHT gradient boosting machine
 from sklearn.base import BaseEstimator
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier
 from sklearn.metrics import accuracy_score,balanced_accuracy_score,classification_report,confusion_matrix,f1_score

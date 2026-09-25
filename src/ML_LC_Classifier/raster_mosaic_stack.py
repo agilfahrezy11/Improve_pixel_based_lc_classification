@@ -1,18 +1,18 @@
-"""Mosaic tiled rasters and stack aligned rasters into GeoTIFFs."""
+"""
+Mosaic tiled rasters and stack aligned rasters into GeoTIFFs.
+Peform only mosaicking and raster stacking to generate multiband raster.
+"""
 
 from contextlib import ExitStack
 from os import PathLike
 from pathlib import Path
 from typing import Iterable, Sequence
 import glob
-
 import rasterio
 from rasterio.crs import CRS
 from rasterio.enums import Resampling
 from rasterio.merge import merge
 from rasterio.vrt import WarpedVRT
-
-
 RasterPath = str | PathLike[str]
 
 #resolve paths issues 

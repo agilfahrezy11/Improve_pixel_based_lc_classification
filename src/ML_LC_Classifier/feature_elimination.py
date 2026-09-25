@@ -1,8 +1,8 @@
 """
 Feature Elimination Module 
 
-This module provides functions to perform Recursive Feature Elimination with Cross Validation (RFECV) for selecting optimal features from the input feature stack, 
-
+This module provides functions to perform Recursive Feature Elimination with Cross Validation (RFECV) 
+for selecting optimal features from the input feature stack.
 
 """
 from dataclasses import dataclass
@@ -12,6 +12,8 @@ from sklearn.base import BaseEstimator
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.feature_selection import RFECV
 
+#design note: 
+#should add csv based elimination for easier load
 #class for orchestrating feature selection and store the result
 @dataclass
 class FeatureSelectionResult:

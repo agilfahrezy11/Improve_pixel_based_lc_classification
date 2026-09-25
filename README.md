@@ -119,6 +119,7 @@ output/                  Local predictions (ignored by Git)
 | `tune_model` | Run grid or randomized cross-validation search and return the best fitted model. |
 | `evaluate_model` | Calculate held-out classification metrics and a confusion matrix. |
 | `classify_raster` | Predict a single-band classified GeoTIFF from an input feature stack. |
+| `save_flagged_points` | Write the original training points as a shapefile with outlier flags and scores. |
 | `mosaic_rasters` | Merge adjacent or overlapping Earth Engine tile downloads into one GeoTIFF. |
 | `stack_rasters` | Align raster layers and write them as ordered bands in one GeoTIFF. |
 

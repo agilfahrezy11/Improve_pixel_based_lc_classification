@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 boosting = [
     "xgboost",
+    "lightgbm",
 ]
 planetary-computer = [
     "planetary-computer",

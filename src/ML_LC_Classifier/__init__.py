@@ -7,10 +7,12 @@ from .feature_elimination import FeatureSelectionResult, select_features
 from .outlier_detection import (
     detect_outliers_per_class,
     detect_point_outliers,
+    flag_outliers_in_vector,
     load_points,
     remove_outliers,
     remove_outliers_from_vector,
     save_cleaned_points,
+    save_flagged_points,
 )
 from .load_extract import (
     class_distribution,
@@ -54,6 +56,7 @@ __all__ = [
     "stack_rasters",
     "detect_outliers_per_class",
     "detect_point_outliers",
+    "flag_outliers_in_vector",
     "download_imagery",
     "drop_nan_samples",
     "extract_pixels_from_shapefile",
@@ -65,6 +68,7 @@ __all__ = [
     "remove_outliers",
     "remove_outliers_from_vector",
     "save_cleaned_points",
+    "save_flagged_points",
     "load_training_samples",
     "open_raster",
     "preview_imagery",
