@@ -103,6 +103,11 @@ src/ML_LC_Classifier/
   feature_elimination.py RFECV feature selection
   tune_model.py          Model construction, hyperparameter tuning, and evaluation
   classify_raster.py     Block-wise GeoTIFF classification
+javascript/              Google Earth Engine scripts (parallel GEE workflow)
+  extract_split_data.js  Pixel sampling and train/test splitting in GEE
+  tune_model.js          Random Forest grid-search tuning in GEE
+  classify_model.js      Hard / soft / multi-probability classification in GEE
+  Post-process.js        Bayesian spatial smoothing for probability maps
 notebooks/               Exploratory notebooks and implementation examples
 input_data/              Local input-data location (ignored by Git)
 output/                  Local predictions (ignored by Git)
@@ -202,8 +207,132 @@ The index calculator recognises the common Landsat names (`blue`, `green`, `red`
 `B08`, `B11`, and `B12`). Sentinel-1 RTC assets are normally `vv` and `vh`.
 Sentinel-1 RTC may require a configured Planetary Computer account for SAS access.
 
+## Google Earth Engine workflow (JavaScript)
+
+The `javascript/` folder contains a parallel pipeline for running the same conceptual workflow entirely inside [Google Earth Engine](https://earthengine.google.com/) (GEE). Each file is a self-contained GEE module that you `require()` in your own GEE script.
+
+### Modules
+
+| File | Purpose |
+| --- | --- |
+| `extract_split_data.js` | Sample pixel values from a GEE feature stack and split them into training / testing sets. |
+| `tune_model.js` | Grid-search hyperparameter tuning for GEE Random Forest. |
+| `classify_model.js` | Hard, soft (OVR probability), and multi-probability classification, plus feature importance and accuracy evaluation. |
+| `Post-process.js` | Empirical-Bayes spatial smoothing (Bayesian smoothing) on multi-class probability images based on Camara et al. (2024). |
+
+### Usage
+
+Import a module at the top of your GEE script using its repository asset path:
+
+```javascript
+var extract = require('users/<username>/<repo>:javascript/extract_split_data');
+var tuning  = require('users/<username>/<repo>:javascript/tune_model');
+var clf     = require('users/<username>/<repo>:javascript/classify_model');
+var post    = require('users/<username>/<repo>:javascript/Post-process');
+```
+
+#### 1 — Extract and split training data
+
+```javascript
+// Stratified split (recommended — preserves class distribution)
+var split = extract.stratifiedSplit(roi, featureStack, 'classId', 10, 0.7, 0, 16);
+// split.trainingPixels — pixel table for model training
+// split.testingPixels  — pixel table for evaluation
+// split.trainFC / split.testFC — vector features for map display
+
+// Simple random split
+var split = extract.randomSplit(featureStack, roi, 'classId', 0.6, 10, 16, 0);
+```
+
+#### 2 — Tune Random Forest hyperparameters
+
+```javascript
+var results = tuning.tuneRandomForest(
+  split.trainingPixels,
+  split.testingPixels,
+  'classId',
+  featureStack.bandNames(),
+  [50, 100, 200],   // numberOfTrees
+  [0],              // variablesPerSplit (0 = GEE default √N)
+  [1, 5]            // minLeafPopulation
+);
+
+var best = tuning.getBestParams(results, 'kappa');
+print('Best params:', best);
+```
+
+#### 3 — Classify
+
+The `classify` function supports three modes controlled by the `mode` argument:
+
+```javascript
+// Hard classification (single-band label map)
+var hardResult = clf.classify('hard', split.trainingPixels, 'classId', featureStack, {
+  nTrees: 200, minLeaf: 1, seed: 0
+});
+Map.addLayer(hardResult.classificationMap, {}, 'Hard classification');
+
+// Soft / OVR probability stack + argmax map
+var softResult = clf.classify('soft', split.trainingPixels, 'classId', featureStack, {
+  nTrees: 200, probabilityScale: 100
+});
+
+// Multi-probability mode (required for Bayesian smoothing)
+var classIdToNameMap = {1: 'Forest', 2: 'Cropland', 3: 'Water', 4: 'Built-up', 5: 'Bare'};
+var multiResult = clf.classify('multi', split.trainingPixels, 'classId', featureStack, {
+  classIdToNameMap: classIdToNameMap, nTrees: 200
+});
+```
+
+Retrieve feature importance and evaluate on the held-out set:
+
+```javascript
+var importance = clf.getFeatureImportance(hardResult.trainedModel);
+print('Feature importance:', importance);
+
+var metrics = clf.evaluateModel(hardResult.trainedModel, split.testingPixels, 'classId');
+print('OA:', metrics.overallAccuracy, 'Kappa:', metrics.kappa);
+print('Error matrix:', metrics.errorMatrix);
+```
+
+#### 4 — Post-process with Bayesian spatial smoothing
+
+Bayesian smoothing is only available for the `'multi'` probability output.
+
+```javascript
+var classBands  = multiResult.classBands;   // ['Forest', 'Cropland', ...]
+var classValues = multiResult.classValues;  // [1, 2, ...]
+
+// Inspect local variance to choose a smoothness value
+var localVar = post.localVariance(multiResult.probsImage, classBands, 7, 0.5);
+
+// Apply smoothing (smoothness ~ prior variance in logit space; higher = more smoothing)
+var smoothedProbs = post.bayesianSmooth(
+  multiResult.probsImage,
+  classBands,
+  0.5,   // smoothness — scalar or {Forest: 0.3, Water: 0.8, ...}
+  7,     // window size (pixels)
+  0.5    // neighbourhood fraction used for local statistics
+);
+
+// Convert smoothed probabilities to a final label map
+var smoothedMap = post.classifyFromProbs(smoothedProbs, classBands, classValues);
+Map.addLayer(smoothedMap, {}, 'Smoothed classification');
+```
+
+### GEE workflow vs Python workflow
+
+| | Python (`ML_LC_Classifier`) | GEE JavaScript |
+| --- | --- | --- |
+| Compute | Local CPU/GPU | Google cloud |
+| Imagery source | Local GeoTIFF / Planetary Computer | GEE image catalog |
+| Classifiers | RF, Extra Trees, LightGBM, XGBoost | Random Forest (GEE built-in) |
+| Spatial smoothing | — | Bayesian (Camara et al. 2024) |
+| Output | Local GeoTIFF | GEE asset / Drive export |
+
 ## Notes
 
 - The order of bands used for prediction must match the order used to train the model.
 - Keep the fitted RFECV selector and pass it to `classify_raster` whenever feature selection was used during training.
 - For reproducible splits and searches, the defaults use `random_state=42`.
+- In the GEE scripts, `seed=0` is used throughout for reproducibility; pass a different seed to any function to change this.
