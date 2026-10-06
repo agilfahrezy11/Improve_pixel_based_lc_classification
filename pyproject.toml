@@ -12,6 +12,7 @@ dependencies = [
     "numpy",
     "pandas",
     "rasterio",
+    "scipy",
     "scikit-learn",
     "lightgbm",
 ]

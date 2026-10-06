@@ -95,6 +95,24 @@ classify_raster(
 
 `classify_raster` processes the source raster in windows, so it does not need to load the entire raster into memory. Invalid source pixels are written with the output's `nodata` value (default: `0`). The model's predicted classes must be numeric for GeoTIFF output.
 
+Use `apply_mmu` to remove undersized 8-connected class patches and fill them
+with the iterated 3x3 neighborhood mode. Thresholds are pixel counts, and
+source nodata pixels are retained:
+
+```python
+from ML_LC_Classifier import apply_mmu
+
+apply_mmu(
+    "output/landcover_prediction.tif",
+    "output/landcover_prediction_mmu.tif",
+    iterations=6,
+)
+```
+
+The default thresholds are available as `MMU_TABLE`; pass a custom mapping
+with `table={class_id: min_pixels, ...}` to override them. Output is a
+single-band uint8 GeoTIFF that keeps the input raster's spatial metadata.
+
 ## Project layout
 
 ```text
@@ -103,6 +121,7 @@ src/ML_LC_Classifier/
   feature_elimination.py RFECV feature selection
   tune_model.py          Model construction, hyperparameter tuning, and evaluation
   classify_raster.py     Block-wise GeoTIFF classification
+  lc_post_process.py     Minimum mapping unit filtering for classified rasters
 javascript/              Google Earth Engine scripts (parallel GEE workflow)
   extract_split_data.js  Pixel sampling and train/test splitting in GEE
   tune_model.js          Random Forest grid-search tuning in GEE
@@ -124,6 +143,7 @@ output/                  Local predictions (ignored by Git)
 | `tune_model` | Run grid or randomized cross-validation search and return the best fitted model. |
 | `evaluate_model` | Calculate held-out classification metrics and a confusion matrix. |
 | `classify_raster` | Predict a single-band classified GeoTIFF from an input feature stack. |
+| `apply_mmu` | Remove undersized class patches and fill them with neighborhood mode. |
 | `save_flagged_points` | Write the original training points as a shapefile with outlier flags and scores. |
 | `mosaic_rasters` | Merge adjacent or overlapping Earth Engine tile downloads into one GeoTIFF. |
 | `stack_rasters` | Align raster layers and write them as ordered bands in one GeoTIFF. |
