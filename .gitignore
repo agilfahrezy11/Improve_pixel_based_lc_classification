@@ -3,3 +3,4 @@
 /input_data
 /output
 /src/ml_lc_classifier.egg-info
+/tests/__pycache__

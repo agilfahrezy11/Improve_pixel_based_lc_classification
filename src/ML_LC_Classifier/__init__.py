@@ -1,7 +1,9 @@
 """Reusable pixel based classification pipeline for land cover mapping tasks"""
 
 from .classify_raster import classify_raster
+from .distance_features import create_distance_features
 from .feature_stack import FeatureStackResult, create_feature_stack
+from .lc_post_process import MMU_TABLE, apply_mmu
 from .raster_mosaic_stack import mosaic_rasters, stack_rasters
 from .feature_elimination import FeatureSelectionResult, select_features
 from .outlier_detection import (
@@ -49,8 +51,11 @@ __all__ = [
     "ModelEvaluation",
     "ModelTuningResult",
     "build_classifier",
+    "apply_mmu",
+    "MMU_TABLE",
     "class_distribution",
     "classify_raster",
+    "create_distance_features",
     "create_feature_stack",
     "mosaic_rasters",
     "stack_rasters",
