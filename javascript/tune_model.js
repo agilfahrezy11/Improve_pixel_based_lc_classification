@@ -100,3 +100,54 @@ exports.getBestParams = function(tuningResults, metric) {
   metric = metric || 'accuracy';
   return tuningResults.sort(metric, false).first();
 };
+/**
+ * 7. Train a MULTIPROBABILITY model only (no map is built).
+ */
+exports.trainMultiProbModel = function(trainingPixels, classProperty, inputProperties, options) {
+  options = options || {};
+  var rfParams = buildRfParams(options.nTrees, options.vSplit, options.minLeaf, options.seed);
+  return ee.Classifier.smileRandomForest(rfParams)
+    .setOutputMode('MULTIPROBABILITY')
+    .train({
+      features: trainingPixels,
+      classProperty: classProperty,
+      inputProperties: inputProperties
+    });
+};
+
+/**
+ * 8. Class values in the order the model outputs them (ascending, from the training data).
+ */
+exports.getClassValues = function(trainingPixels, classProperty) {
+  return trainingPixels.aggregate_array(classProperty).distinct().sort();
+};
+
+/**
+ * 9. Probability metrics on a table of test/validation pixels.
+ * Returns log loss and top-class accuracy from a single classify pass.
+ */
+exports.evaluateProbabilities = function(trainedModel, testPixels, classProperty, classValues, eps) {
+  eps = (eps !== undefined) ? eps : 1e-3;
+  var classList = ee.List(classValues);
+
+  // drop test rows whose class was absent from training (no probability column for them)
+  var valid = testPixels.filter(ee.Filter.inList(classProperty, classList));
+  var scored = valid.classify(trainedModel, 'probs');
+
+  var withMetrics = scored.map(function(f) {
+    var probs = ee.List(f.get('probs'));
+    var trueIdx = classList.indexOf(ee.Number(f.get(classProperty)));
+    var pTrue = ee.Number(probs.get(trueIdx)).max(eps);
+    var predIdx = ee.List(ee.Array(probs).argmax()).get(0);
+    return f.set({
+      nll: pTrue.log().multiply(-1),
+      correct: ee.Number(predIdx).eq(trueIdx)
+    });
+  });
+
+  return {
+    logLoss: withMetrics.aggregate_mean('nll'),
+    accuracy: withMetrics.aggregate_mean('correct'),
+    n: withMetrics.size()
+  };
+};

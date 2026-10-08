@@ -221,3 +221,97 @@ exports.evaluateModel = function(trainedModel, testPixels, classProperty) {
     consumersAccuracy: errorMatrix.consumersAccuracy()
   };
 };
+
+/**
+ * 7. Probability Evaluation — Log Loss (overall and per-class)
+ *
+ * Computes log loss using the predicted probabilities from a MULTIPROBABILITY
+ * classifier against ground-truth labels in testPixels.
+ *
+ * Log loss per sample = -log(p_true_class + eps)
+ * Overall log loss    = mean over all test samples
+ * Per-class log loss  = mean over samples belonging to that class
+ *
+ * @param {ee.FeatureCollection} testPixels  - Labeled test features (same schema as training).
+ * @param {ee.Classifier}        trainedModel - Model trained with setOutputMode('MULTIPROBABILITY').
+ * @param {string}               classProperty - Property name holding the integer class label.
+ * @param {Object}               classIdToNameMap - Mapping of integer class id → band name string,
+ *                               e.g. {1: 'Water', 2: 'Forest'}. Must match the order used during training.
+ * @param {number}               [eps=1e-7] - Small epsilon added to probabilities before log to
+ *                               avoid log(0). Defaults to 1e-7.
+ * @returns {ee.Dictionary} Dictionary with keys:
+ *   - 'overallLogLoss'   {ee.Number}     — mean log loss across all samples
+ *   - 'perClassLogLoss'  {ee.Dictionary} — per-class name → mean log loss for that class
+ *   - 'nSamples'         {ee.Number}     — total number of test samples evaluated
+ *   - 'perClassNSamples' {ee.Dictionary} — per-class name → sample count
+ */
+exports.evaluateProbabilities = function(testPixels, trainedModel, classProperty, classIdToNameMap, eps) {
+  eps = (eps !== undefined && eps !== null) ? eps : 1e-7;
+
+  // Parse sorted class ids and matching band names (must mirror multiProbabilityClassification)
+  var sortedIds   = Object.keys(classIdToNameMap).map(Number).sort(function(a, b) { return a - b; });
+  var classBands  = sortedIds.map(function(id) { return classIdToNameMap[id]; });
+  var eeClassIds  = ee.List(sortedIds);
+  var eeBandNames = ee.List(classBands);
+
+  // Classify test pixels — returns an array-valued property 'classification'
+  var classified = testPixels.classify(trainedModel);
+
+  // Attach each class probability as a named feature property via server-side iterate.
+  // (A direct .map() cannot dynamically set property names from an ee.List, so we fold
+  //  over class indices instead.)
+  // Server-side approach: iterate over class indices to attach each prob as a feature property
+  classified = ee.FeatureCollection(
+    ee.List.sequence(0, eeBandNames.size().subtract(1)).iterate(function(idx, fc) {
+      idx = ee.Number(idx);
+      var bandName = ee.String(eeBandNames.get(idx));
+      return ee.FeatureCollection(fc).map(function(ft) {
+        var prob = ee.Array(ft.get('classification')).get([idx]);
+        return ft.set(bandName, prob);
+      });
+    }, classified)
+  );
+
+  // Compute per-sample log loss: -log(p_true + eps)
+  classified = classified.map(function(ft) {
+    var trueClassId  = ee.Number(ft.get(classProperty));
+    // Find index of true class id in sorted list
+    var trueIdx      = eeClassIds.indexOf(trueClassId);
+    var trueProb     = ee.Number(ee.Array(ft.get('classification')).get([trueIdx]));
+    var sampleLoss   = trueProb.add(eps).log().multiply(-1);
+    return ft.set('_log_loss', sampleLoss);
+  });
+
+  // Overall log loss — mean across all samples
+  var overallLogLoss = classified.aggregate_mean('_log_loss');
+  var nSamples       = classified.size();
+
+  // Per-class log loss — mean within each class subset
+  var perClassLogLoss    = ee.Dictionary.fromLists(
+    eeBandNames,
+    eeClassIds.map(function(classId) {
+      classId        = ee.Number(classId);
+      var classSubset = classified.filter(ee.Filter.eq(classProperty, classId));
+      return ee.Algorithms.If(
+        classSubset.size().gt(0),
+        classSubset.aggregate_mean('_log_loss'),
+        ee.Number(null)
+      );
+    })
+  );
+
+  var perClassNSamples = ee.Dictionary.fromLists(
+    eeBandNames,
+    eeClassIds.map(function(classId) {
+      classId = ee.Number(classId);
+      return classified.filter(ee.Filter.eq(classProperty, classId)).size();
+    })
+  );
+
+  return ee.Dictionary({
+    overallLogLoss:   overallLogLoss,
+    perClassLogLoss:  perClassLogLoss,
+    nSamples:         nSamples,
+    perClassNSamples: perClassNSamples
+  });
+};

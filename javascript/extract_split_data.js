@@ -73,10 +73,8 @@ exports.stratifiedSplit = function(roi, image, classProp, pixelSize, trainRatio,
   seed = seed !== undefined ? seed : 0;
   tileScale = tileScale !== undefined ? tileScale : 16;
 
-  //Get unique class IDs present in the data
   var classes = roi.aggregate_array(classProp).distinct();
 
-  //Function to perform stratified random split per class
   var splitClass = function(c) {
     var subset = roi.filter(ee.Filter.eq(classProp, c))
                     .randomColumn('random', seed);
@@ -89,30 +87,32 @@ exports.stratifiedSplit = function(roi, image, classProp, pixelSize, trainRatio,
     return train.merge(test);
   };
 
-  // Map function across all class IDs and flatten
   var splitFC = ee.FeatureCollection(classes.map(splitClass)).flatten();
 
-  //partition training and testing feature collections
   var trainFC = splitFC.filter(ee.Filter.eq('fraction', 'training'));
-  var testFC = splitFC.filter(ee.Filter.eq('fraction', 'testing'));
+  var testFC  = splitFC.filter(ee.Filter.eq('fraction', 'testing'));
 
-  //Sample pixel values from image
+  // Tabular sampling (did not return geometry since it use for model tuning)
   var trainPix = image.sampleRegions({
     collection: trainFC,
     properties: [classProp],
     scale: pixelSize,
-    tileScale: tileScale
+    tileScale: tileScale,
+    geometries: false
   });
 
   var testPix = image.sampleRegions({
     collection: testFC,
     properties: [classProp],
     scale: pixelSize,
-    tileScale: tileScale
+    tileScale: tileScale,
+    geometries: false
   });
 
   return {
-    trainingPixels: trainPix,
-    testingPixels: testPix
+    trainingPixels: trainPix, //for model tuning
+    testingPixels: testPix,   //for model evaluations
+    trainFC: trainFC,         //vector training data
+    testFC: testFC            //vector for testing maps
   };
 };
