@@ -54,26 +54,6 @@ var smoothness = {
   'Dry_riverbed': 0.5          // Preserved low
 }
 
-/*
-//Testing
-var testArea = ee.Geometry.BBox(125.38, -8.76, 125.41, -8.73);
-var testProbs = lc_prob_2025.clip(testArea);
-// Fast local variance check
-var localVarTest = post.localVariance(testProbs, class_bands, 5, 0.5);
-print('Test Area Variance:', localVarTest.reduceRegion({
-  reducer: ee.Reducer.percentile([50, 75, 90]),
-  geometry: testArea,
-  scale: 10,
-  maxPixels: 1e7
-}));
-// Test smoothing locally
-var testSmoothed = post.bayesianSmooth(testProbs, class_bands, smoothness, 5, 0.5);
-var testLabel = post.classifyFromProbs(testSmoothed, class_bands, class_value);
-
-Map.centerObject(testArea, 10)
-Map.addLayer(testLabel, {min: 1, max: 18}, 'Smoothed Test Area');
-*/
-
 //Bayesian Smoothing
 /////////2. Implement post-processing bayesian smoothing/////////
 
@@ -127,9 +107,9 @@ var classVis = {
     '#FDD835', // 12 Other_cropland
     '#D9EF8B', // 13 Grassland
     '#C2A878', // 14 Shrubland
-    '#E6550D', // 15 Cleared_land
+    '#d7d6d6', // 15 Cleared_land
     '#DB310D', // 16 Built-up
-    '#2171B5', // 17 Waterbody
+    '#0e8acc', // 17 Waterbody
     '#9ECAE1'  // 18 Dry_riverbed
   ]
 };
@@ -138,10 +118,49 @@ var classVis = {
 Map.addLayer(lc_smooth_2020, classVis, 'Smooth Land Cover (argmax) 2020')
 Map.addLayer(lc_smooth_2025, classVis, 'Smooth Land Cover (argmax) 2025')
 
+///////// 3. Load & Process Auxiliary Datasets /////////
+// A. ETH Global Sentinel-2 10m Canopy Height (2020)
+var ethCanopy = ee.Image('users/nlang/ETH_GlobalCanopyHeight_2020_10m_v1').clip(aoi);
+// B. Global Pasture Watch 30m Short Vegetation Height
+var gsvh = ee.ImageCollection('projects/global-pasture-watch/assets/gsvh-30m/v1/short-veg-height')
+  .filterDate('2025-01-01', '2025-12-31')
+  .first()
+  .select('short_veg_height')
+  .clip(aoi);
+// C. High Resolution Settlement Layer (HRSL / Facebook Meta)
+var hrsl = ee.ImageCollection('projects/sat-io/open-datasets/hrsl')
+  .filterBounds(aoi)
+  .mosaic()
+  .gt(0)
+  .clip(aoi);
+  
+///////// 4. Auxiliary Structural Mask Constraints /////////
+// Primary Forest constraint: Height must be >= 15m
+var isShortCanopy = ethCanopy.lt(15);
+// Built-up constraint: Must fall within HRSL populated footprints
+var isNonSettlement = hrsl.unmask(0).eq(0);
+// Grassland / Shrubland constraint: Short vegetation validation
+var isTallVegetation = ethCanopy.gt(12);
+// Apply constraints as probability penalizers prior to classification
+var adjustProbs = function(probImage) {
+  var pPrimary = probImage.select('Primary_forest').multiply(isShortCanopy.not());
+  var pSecondary = probImage.select('Secondary_forest').add(probImage.select('Primary_forest').multiply(isShortCanopy));
+  var pBuilt = probImage.select('Built-up').multiply(isNonSettlement.not());
+  var pGrass = probImage.select('Grassland').multiply(isTallVegetation.not());
+  
+  return probImage
+    .addBands(pPrimary, ['Primary_forest'], true)
+    .addBands(pSecondary, ['Secondary_forest'], true)
+    .addBands(pBuilt, ['Built-up'], true)
+    .addBands(pGrass, ['Grassland'], true);
+};
+
+var constrainedProbs_2025 = adjustProbs(smoothedProbs_2025);
+var constrainedProbs_2020 = adjustProbs(smoothedProbs_2020);
+
 /////////5. CCDC Masking layer/////////
 //use CCDC features to detect breaks in the time series
 //breaks might indicate unstable pixels
-
 //CCDC source code
 var ccdcModule = require('users/rg2icraf/Luma:ccdc_sentinel2');
 //define CCDC assets
@@ -163,23 +182,85 @@ var stable = nBreaks.eq(0)
  // .focalMode({radius: 20, units: 'meters'});   // removes isolated stable/unstable pixels
   
 //2025 is the anchor. 2020 inherits it where nothing changed.
-var finalProbs_2025 = smoothedProbs_2025;
-var finalProbs_2020 = smoothedProbs_2025.multiply(stable)
-  .add(smoothedProbs_2020.multiply(stable.not()));
+var finalProbs_2025 = constrainedProbs_2025; //change to constrained probability, modified to smoothedProbs_2025 to revert
+var finalProbs_2020 = constrainedProbs_2025.multiply(stable)
+  .add(constrainedProbs_2020.multiply(stable.not()));
 
 var lc_final_2025 = post.classifyFromProbs(finalProbs_2025, class_bands, class_value);
 var lc_final_2020 = post.classifyFromProbs(finalProbs_2020, class_bands, class_value);
 
-// water merge on the labels, as you decided
+// water merge on the labels (waterbody and dryriverbed)
 lc_final_2020 = lc_final_2020.where(lc_final_2020.eq(18), 17);
 lc_final_2025 = lc_final_2025.where(lc_final_2025.eq(18), 17);
+
+// =========================================================================
+// 1. AUXILIARY CONSTRAINTS ON PROBABILITIES
+// =========================================================================
+var constrainedProbs_2025 = adjustProbs(smoothedProbs_2025);
+var constrainedProbs_2020 = adjustProbs(smoothedProbs_2020);
+
+// Generate initial discrete labels
+var lc20 = post.classifyFromProbs(constrainedProbs_2020, class_bands, class_value).toInt16();
+var lc25 = post.classifyFromProbs(constrainedProbs_2025, class_bands, class_value).toInt16();
+
+// Merge Water classes first (Dry riverbed 18 -> Waterbody 17)
+lc20 = lc20.where(lc20.eq(18), 17);
+lc25 = lc25.where(lc25.eq(18), 17);
+
+// =========================================================================
+// 2. ENFORCE CONSISTENCY RULES
+// =========================================================================
+function enforceConsistency(lc2020, lc2025, invalid, stableMask) {
+  var codes = invalid.map(function(p) { return p[0] * 100 + p[1]; });
+  var pair = lc2020.toInt16().multiply(100).add(lc2025.toInt16()).rename('pair');
+  var flag = pair.remap(codes, ee.List.repeat(1, codes.length), 0).rename('flag');
+  if (stableMask) { flag = flag.and(stableMask); }
+  return {
+    label: lc2020.where(flag.eq(1), lc2025).toInt16(),
+    flag: flag,
+    pair: pair
+  };
+}
+
+//define the impossible transitions
+// Rule groups: [class in 2020, class in 2025]
+//Impossible transition
+var impossible = [
+  [2, 1],   // Secondary Forest -> Primary Forest
+  [14, 1],  // Shrubland -> Primary Forest
+  [13, 1],  // Grassland -> Primary Forest
+  [12, 1],  // Other Cropland -> Primary Forest
+  [15, 1],  // Cleared Land -> Primary Forest
+  [16, 1],  // Built-up -> Primary Forest
+  [17, 1]   // Waterbody -> Primary Forest
+];
+//Unlikely transition
+//Blocked ONLY where CCDC shows STABLE (No break detected)
+var unlikely = [
+  [14, 2],  // Shrubland -> Secondary Forest (Fast regrowth; only keep if CCDC recorded a break)
+  [13, 2],  // Grassland -> Secondary Forest
+  [16, 13], // Built-up -> Grassland (Urban decay/abandonment on stable ground is usually spectral noise)
+  [16, 14], // Built-up -> Shrubland
+  [5, 1],   // Teak Plantation -> Primary Forest
+  [6, 1]    // Eucalyptus Plantation -> Primary Forest
+];
+
+// Step 1: Impossible transitions (Applied everywhere)
+var step1 = enforceConsistency(lc20, lc25, impossible);
+
+// Step 2: Unlikely transitions (Applied ONLY on CCDC stable pixels)
+var step2 = enforceConsistency(step1.label, lc25, unlikely, stable);
+
+// Final persistent outputs
+var lc_final_2020 = step2.label.rename('classification').toByte();
+var lc_final_2025 = lc25.rename('classification').toByte();
 var classVis = {
   min: 1,
   max: 17,
   palette: [
     '#00441B', // 1  Primary_forest
-    '#238B45', // 2  Secondary_forest
-    '#006D2C', // 3  Mangrove_forest
+    '#35a23d', // 2  Secondary_forest
+    '#006d6b', // 3  Mangrove_forest
     '#66C2A4', // 4  Coastal_forest
     '#8C6D31', // 5  Teak_plantation
     '#A6761D', // 6  Eucalyptus_plantation
@@ -189,15 +270,12 @@ var classVis = {
     '#A1D76A', // 10  Mixed_garden
     '#C7E9B4', // 11 Paddy_field
     '#FDD835', // 12 Other_cropland
-    '#D9EF8B', // 13 Grassland
+    '#c4f298', // 13 Grassland
     '#C2A878', // 14 Shrubland
     '#d7d6d6', // 15 Cleared_land
     '#DB310D', // 16 Built-up
     '#0e8acc'  // 17 Water
   ]
 };
-
-
-
-//Map.addLayer(lc_final_2020, classVis, 'Consistency Land Cover 2020')
-//Map.addLayer(lc_final_2025, classVis, 'Consistency Land Cover 2025')
+Map.addLayer(lc_final_2020, classVis, 'Consistency Land Cover 2020')
+Map.addLayer(lc_final_2025, classVis, 'Consistency Land Cover 2025')
