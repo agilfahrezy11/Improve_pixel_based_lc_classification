@@ -42,6 +42,15 @@ from .planetary_computer import (
     preview_imagery,
     search_imagery,
 )
+from .hybrid_assembly import MaskRule, process_tile, refine_lulc_with_mask_layer
+from .classification_assembly import (
+    bayesian_smooth,
+    classify_from_probs,
+    local_mean_variance,
+    local_variance,
+    logits_to_probs,
+    probs_to_logits,
+)
 
 __all__ = [
     "FeatureSelectionResult",
@@ -51,8 +60,10 @@ __all__ = [
     "ModelEvaluation",
     "ModelTuningResult",
     "build_classifier",
+    "bayesian_smooth",
     "apply_mmu",
     "apply_transition_consistency",
+    "classify_from_probs",
     "MMU_TABLE",
     "TransitionRule",
     "class_distribution",
@@ -77,11 +88,18 @@ __all__ = [
     "save_cleaned_points",
     "save_flagged_points",
     "load_training_samples",
+    "local_mean_variance",
+    "local_variance",
+    "logits_to_probs",
     "open_raster",
     "preview_imagery",
+    "probs_to_logits",
     "search_imagery",
     "select_features",
     "train_test_split_data",
     "evaluate_model",
     "tune_model",
+    "MaskRule",
+    "process_tile",
+    "refine_lulc_with_mask_layer",
 ]
