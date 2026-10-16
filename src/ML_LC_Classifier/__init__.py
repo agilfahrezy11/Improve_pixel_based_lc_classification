@@ -3,7 +3,16 @@
 from .classify_raster import classify_raster
 from .distance_features import create_distance_features
 from .feature_stack import FeatureStackResult, create_feature_stack
-from .lc_post_process import MMU_TABLE, apply_mmu, apply_transition_consistency, TransitionRule, calculate_class_area
+from .lc_post_process import (
+    DEFAULT_HYBRID_MMU_TABLE,
+    DEFAULT_TIMOR_17_CLASSES,
+    MMU_TABLE,
+    TransitionRule,
+    apply_mmu,
+    apply_transition_consistency,
+    calculate_class_area,
+    calculate_transition_matrix,
+)
 from .raster_mosaic_stack import mosaic_rasters, stack_rasters
 from .feature_elimination import FeatureSelectionResult, select_features
 from .outlier_detection import (
@@ -63,7 +72,11 @@ __all__ = [
     "bayesian_smooth",
     "apply_mmu",
     "apply_transition_consistency",
+    "calculate_class_area",
+    "calculate_transition_matrix",
     "classify_from_probs",
+    "DEFAULT_TIMOR_17_CLASSES",
+    "DEFAULT_HYBRID_MMU_TABLE",
     "MMU_TABLE",
     "TransitionRule",
     "class_distribution",
