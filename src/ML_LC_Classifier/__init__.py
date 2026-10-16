@@ -3,7 +3,7 @@
 from .classify_raster import classify_raster
 from .distance_features import create_distance_features
 from .feature_stack import FeatureStackResult, create_feature_stack
-from .lc_post_process import MMU_TABLE, apply_mmu, apply_transition_consistency, TransitionRule
+from .lc_post_process import MMU_TABLE, apply_mmu, apply_transition_consistency, TransitionRule, calculate_class_area
 from .raster_mosaic_stack import mosaic_rasters, stack_rasters
 from .feature_elimination import FeatureSelectionResult, select_features
 from .outlier_detection import (
