@@ -33,6 +33,7 @@ from rasterio.windows import Window
 from rasterio.enums import Resampling
 from rasterio.vrt import WarpedVRT
 from scipy.ndimage import label
+from .seam_healing import heal_array_seams
 
 # 1. CLASS DEFINITIONS & SMOOTHNESS WEIGHTS
 CLASS_ID_TO_NAME = {
@@ -331,6 +332,7 @@ def process_tile(
     overlap: int = 64,
     tau: float = STABILITY_TAU,
     adaptive_sensitivity: float = ADAPTIVE_SENSITIVITY,
+    smoothness_dict: dict[str, float] | None = None,
     merge_water_riverbed: bool = MERGE_WATER_RIVERBED,
     # Optional mask layers / rules
     refinement_rules: list[MaskRule | dict[str, Any]] | None = None,
@@ -357,6 +359,7 @@ def process_tile(
     print(f"Probabilities: {prob_path}")
     print(f"Segments:      {seg_path}")
     print(f"Block size:    {block_size}x{block_size} (overlap: {overlap}px)")
+    print(f"Stability tau: {tau} | Adaptive sensitivity: {adaptive_sensitivity}")
 
     # Prepare optional mask refinement rules
     active_mask_rules = _resolve_mask_rules(
@@ -376,10 +379,11 @@ def process_tile(
         seg_meta = src_seg.profile.copy()
 
         # Class base weights
+        smooth_table = smoothness_dict or SMOOTHNESS_TL
         w_base = np.zeros(num_classes, dtype=np.float32)
         for c_id, name in CLASS_ID_TO_NAME.items():
             if c_id - 1 < num_classes:
-                smoothness = SMOOTHNESS_TL.get(name, 1.0)
+                smoothness = smooth_table.get(name, 1.0)
                 w_base[c_id - 1] = float(np.clip(smoothness / 5.0, 0.2, 0.9))
 
         # Setup output profiles (uint8 for LULC/Stability, float32 for CI)
@@ -464,13 +468,6 @@ def process_tile(
                     # Read segments
                     seg_block = src_seg.read(1, window=win_seg).copy()
 
-                    # Fast check: if entire block is nodata (-1 or 0)
-                    if np.all((seg_block == -1) | (seg_block == 0)):
-                        dst_lulc.write(np.zeros((win_write_h, win_write_w), dtype=np.uint8), 1, window=win_write)
-                        dst_stab.write(np.zeros((win_write_h, win_write_w), dtype=np.uint8), 1, window=win_write)
-                        dst_ci.write(np.zeros((win_write_h, win_write_w), dtype=np.float32), 1, window=win_write)
-                        continue
-
                     # Read and resample corresponding probabilities
                     bounds = src_seg.window_bounds(win_seg)
                     row_start, col_start = src_prob.index(bounds[0], bounds[3])
@@ -487,7 +484,7 @@ def process_tile(
                         resampling=Resampling.bilinear
                     ).astype(np.float32) / 10000.0
 
-                    # Check if all probabilities are zero
+                    # Check if all probabilities are zero (true background nodata)
                     prob_has_signal = np.any(prob_block > 0, axis=0)
                     if not np.any(prob_has_signal):
                         dst_lulc.write(np.zeros((win_write_h, win_write_w), dtype=np.uint8), 1, window=win_write)
@@ -501,22 +498,25 @@ def process_tile(
                         labeled, _ = label(is_clamp)
                         seg_block[is_clamp] = -2000000000 - labeled[is_clamp]
 
-                    # 2. Valid mask: all valid IDs (including negative int32 wrapped IDs)
-                    valid_mask = (seg_block != -1) & (seg_block != 0) & prob_has_signal
-                    if not np.any(valid_mask):
-                        dst_lulc.write(np.zeros((win_write_h, win_write_w), dtype=np.uint8), 1, window=win_write)
-                        dst_stab.write(np.zeros((win_write_h, win_write_w), dtype=np.uint8), 1, window=win_write)
-                        dst_ci.write(np.zeros((win_write_h, win_write_w), dtype=np.float32), 1, window=win_write)
-                        continue
+                    # 2. Heal thin 1-4px zero seams and gaps in segments within valid data regions
+                    seg_block = heal_array_seams(seg_block, nodata=0, max_seam_width=4)
 
-                    # 3. Compact ID remapping for this window
-                    unique_ids, inverse = np.unique(seg_block[valid_mask], return_inverse=True)
-                    n_segs = len(unique_ids)
-                    seg_compact = np.full(seg_block.shape, -1, dtype=np.int32)
-                    seg_compact[valid_mask] = inverse.astype(np.int32)
+                    # 3. Identify segmented pixels vs pure-pixel fallback
+                    has_seg = (seg_block != -1) & (seg_block != 0) & prob_has_signal
+                    has_any_seg = np.any(has_seg)
 
-                    # 4. Bayesian Blending & Argmax Tracking
-                    counts = np.bincount(seg_compact[valid_mask], minlength=n_segs)
+                    # 4. Compact ID remapping for valid segments in this window
+                    if has_any_seg:
+                        unique_ids, inverse = np.unique(seg_block[has_seg], return_inverse=True)
+                        n_segs = len(unique_ids)
+                        seg_compact = np.full(seg_block.shape, -1, dtype=np.int32)
+                        seg_compact[has_seg] = inverse.astype(np.int32)
+                        counts = np.bincount(seg_compact[has_seg], minlength=n_segs)
+                    else:
+                        n_segs = 0
+                        counts = np.array([], dtype=np.int64)
+
+                    # 5. Bayesian Blending & Argmax Tracking
                     H, W = read_h, read_w
                     W_max = np.zeros((H, W), dtype=np.float32)
                     S_max = np.zeros((H, W), dtype=np.float32)
@@ -528,19 +528,28 @@ def process_tile(
                         class_id = c + 1
                         raw = prob_block[c]
 
-                        # Object mean via bincount
-                        prob_v = raw[valid_mask].astype(np.float64)
-                        sums = np.bincount(seg_compact[valid_mask], weights=prob_v, minlength=n_segs)
-                        with np.errstate(divide='ignore', invalid='ignore'):
-                            mean_lookup = np.where(counts > 0, sums / counts, 0.0).astype(np.float32)
+                        if has_any_seg:
+                            # Object mean via bincount
+                            prob_v = raw[has_seg].astype(np.float64)
+                            sums = np.bincount(seg_compact[has_seg], weights=prob_v, minlength=n_segs)
+                            with np.errstate(divide='ignore', invalid='ignore'):
+                                mean_lookup = np.where(counts > 0, sums / counts, 0.0).astype(np.float32)
 
-                        obj = np.zeros((H, W), dtype=np.float32)
-                        obj[valid_mask] = mean_lookup[seg_compact[valid_mask]]
+                            obj = np.zeros((H, W), dtype=np.float32)
+                            obj[has_seg] = mean_lookup[seg_compact[has_seg]]
 
-                        # Adaptive object weight (Malinverni & Sanita 2026)
-                        obj_ci_proxy = np.abs(obj - raw).clip(0.0, 1.0)
-                        w_eff = w_base[c] * (1.0 - adaptive_sensitivity * obj_ci_proxy)
-                        blended = (obj * w_eff) + (raw * (1.0 - w_eff))
+                            # Adaptive object weight (Malinverni & Sanita 2026)
+                            obj_ci_proxy = np.abs(obj - raw).clip(0.0, 1.0)
+                            w_eff = np.where(
+                                has_seg,
+                                w_base[c] * (1.0 - adaptive_sensitivity * obj_ci_proxy),
+                                0.0,
+                            )
+                            blended = (obj * w_eff) + (raw * (1.0 - w_eff))
+                        else:
+                            # Pure pixel fallback if no segments present in this window
+                            blended = raw
+
                         blend_sum += blended
 
                         # Winner / Runner-up argmax tracking
@@ -590,8 +599,8 @@ def process_tile(
                             if np.any(rule_mask):
                                 winner[rule_mask] = rule.to_class
 
-                    # Apply nodata mask
-                    nodata_mask = ~valid_mask
+                    # Apply nodata mask (only true background nodata with zero satellite probability)
+                    nodata_mask = ~prob_has_signal
                     winner[nodata_mask] = 0
                     is_stable[nodata_mask] = 0
                     CI[nodata_mask] = 0.0

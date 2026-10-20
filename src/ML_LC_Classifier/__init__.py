@@ -60,8 +60,32 @@ from .classification_assembly import (
     logits_to_probs,
     probs_to_logits,
 )
+from .trajectory_analysis import (
+    DEFAULT_TIMOR_18_CLASSES,
+    IntervalTransitionSummary,
+    MultiTemporalTrajectoryResult,
+    TRAJECTORY_CLASSES,
+    analyze_multi_temporal_transitions,
+    export_multi_epoch_sankey,
+)
+from .seam_healing import (
+    heal_array_seams,
+    heal_probability_array_spikes,
+    heal_probability_seams,
+    heal_raster_seams,
+)
 
 __all__ = [
+    "heal_raster_seams",
+    "heal_array_seams",
+    "heal_probability_seams",
+    "heal_probability_array_spikes",
+    "analyze_multi_temporal_transitions",
+    "export_multi_epoch_sankey",
+    "MultiTemporalTrajectoryResult",
+    "IntervalTransitionSummary",
+    "TRAJECTORY_CLASSES",
+    "DEFAULT_TIMOR_18_CLASSES",
     "FeatureSelectionResult",
     "FeatureStackResult",
     "DownloadedAsset",
