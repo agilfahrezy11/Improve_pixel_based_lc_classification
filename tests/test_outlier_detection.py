@@ -6,6 +6,7 @@ from shapely.geometry import Point
 
 from ML_LC_Classifier import (
     extract_point_features,
+    flag_outliers_in_vector,
     remove_outliers,
     remove_outliers_from_vector,
 )
@@ -41,6 +42,26 @@ def test_remove_outliers_from_vector_preserves_geometry_and_crs():
     assert cleaned["point_id"].tolist() == ["p1"]
     assert cleaned.geometry.iloc[0].equals(Point(100, 0))
     assert cleaned.crs == samples.crs
+
+
+def test_flag_outliers_in_vector_preserves_all_points_and_attributes():
+    samples = gpd.GeoDataFrame(
+        {"point_id": ["p1", "p2", "p3"], "class_id": [1, 1, 2]},
+        geometry=[Point(100, 0), Point(101, 1), Point(102, 2)],
+        crs="EPSG:4326",
+    )
+    flags = gpd.GeoDataFrame(
+        {"point_id": ["p1", "p2"], "outlier": [False, True], "score": [0.1, 2.5]},
+    )
+
+    flagged = flag_outliers_in_vector(samples, flags)
+
+    assert flagged["point_id"].tolist() == ["p1", "p2", "p3"]
+    assert flagged["outlier"].tolist() == [False, True, False]
+    assert flagged["score"].tolist()[:2] == [0.1, 2.5]
+    assert np.isnan(flagged.loc[2, "score"])
+    assert flagged.geometry.iloc[1].equals(Point(101, 1))
+    assert flagged.crs == samples.crs
 
 
 def test_extract_point_features_preserves_ids_labels_and_band_names(tmp_path):
