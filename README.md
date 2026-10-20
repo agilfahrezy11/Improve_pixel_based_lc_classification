@@ -11,6 +11,7 @@ A Python toolkit for land-cover classification utilizing machine learning classi
 - Tunes Random Forest, Extra Trees, LightGBM, XGBoost, or another compatible estimator.
 - Reports accuracy, balanced accuracy, macro/weighted F1, a classification report, and a confusion matrix.
 - Classifies large rasters in blocks while retaining their spatial metadata.
+- Smooths per-class land-cover probability rasters with empirical-Bayes spatial smoothing.
 
 ## Requirements and installation
 
@@ -39,6 +40,33 @@ Install remote-imagery support only when you need Microsoft Planetary Computer:
 ```bash
 python -m pip install -e ".[planetary-computer]"
 ```
+
+## Bayesian probability smoothing
+
+`bayesian_smooth` reproduces the logit-based spatial smoothing in
+`javascript/Post-process.js` using NumPy arrays, without Earth Engine. Arrays
+read directly from Rasterio use `(classes, rows, columns)` order by default:
+
+```python
+import rasterio
+from ML_LC_Classifier import bayesian_smooth, classify_from_probs
+
+with rasterio.open("probabilities.tif") as source:
+    probabilities = source.read().astype("float64") / 10000.0
+
+smoothed = bayesian_smooth(
+    probabilities,
+    smoothness=1.0,
+    window_size=7,
+    neigh_fraction=0.5,
+)
+classification = classify_from_probs(smoothed, class_values=range(1, 19))
+```
+
+The input may also be a `(rows, columns, classes)` array by setting
+`class_axis=-1`. `local_variance` returns the per-class neighborhood variance
+used by the smoother. `classify_from_probs` returns `-1` for pixels where all
+class probabilities are non-finite.
 
 ## Quick start
 
