@@ -61,11 +61,13 @@ from .classification_assembly import (
     probs_to_logits,
 )
 from .trajectory_analysis import (
+    DEFAULT_IMPOSSIBLE_TRANSITIONS,
     DEFAULT_TIMOR_18_CLASSES,
     IntervalTransitionSummary,
     MultiTemporalTrajectoryResult,
     TRAJECTORY_CLASSES,
     analyze_multi_temporal_transitions,
+    apply_multi_epoch_transition_consistency,
     export_multi_epoch_sankey,
 )
 from .seam_healing import (
@@ -81,11 +83,13 @@ __all__ = [
     "heal_probability_seams",
     "heal_probability_array_spikes",
     "analyze_multi_temporal_transitions",
+    "apply_multi_epoch_transition_consistency",
     "export_multi_epoch_sankey",
     "MultiTemporalTrajectoryResult",
     "IntervalTransitionSummary",
     "TRAJECTORY_CLASSES",
     "DEFAULT_TIMOR_18_CLASSES",
+    "DEFAULT_IMPOSSIBLE_TRANSITIONS",
     "FeatureSelectionResult",
     "FeatureStackResult",
     "DownloadedAsset",

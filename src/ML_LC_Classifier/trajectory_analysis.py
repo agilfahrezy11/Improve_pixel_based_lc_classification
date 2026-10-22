@@ -17,7 +17,11 @@ import pandas as pd
 import rasterio
 import rasterio.windows
 
-from .lc_post_process import DEFAULT_TIMOR_17_CLASSES
+from .lc_post_process import (
+    DEFAULT_TIMOR_17_CLASSES,
+    TransitionRule,
+    apply_transition_consistency,
+)
 
 RasterPath = str | PathLike[str]
 
@@ -66,6 +70,7 @@ class IntervalTransitionSummary:
     interval_years: float
     transition_matrix_ha: pd.DataFrame
     class_summary_ha: pd.DataFrame
+    overall_disagreement: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -79,33 +84,23 @@ class MultiTemporalTrajectoryResult:
     trajectory_raster_path: Path | None = None
 
 
-def _calculate_interval_metrics(
-    t1_arr: np.ndarray,
-    t2_arr: np.ndarray,
-    classes: Mapping[int, str],
+def _compute_pontius_summary_tables(
+    sub_counts: np.ndarray,
+    labels: list[str],
     pixel_area_ha: float,
     t1_year: int,
     t2_year: int,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Compute cross-tabulation, Net/Swap components, and annual rates."""
-    all_ids = sorted(classes.keys())
-    max_id = max(max(all_ids, default=0), 255)
-    labels = [classes[cid] for cid in all_ids]
+) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, float]]:
+    """Compute transition matrix, Pontius Quantity/Allocation/Exchange/Shift, and Puyravaud rates."""
     dt = max(float(t2_year - t1_year), 0.1)
-
-    # 2D cross-tabulation
-    encoded = t1_arr * (max_id + 1) + t2_arr
-    flat_counts = np.bincount(encoded, minlength=(max_id + 1) ** 2)
-    counts_2d = flat_counts.reshape((max_id + 1, max_id + 1))
-
-    sub_counts = counts_2d[np.ix_(all_ids, all_ids)]
     sub_areas = np.round(sub_counts * pixel_area_ha, 4)
+    total_landscape_ha = max(float(sub_areas.sum()), 1e-6)
 
     matrix_df = pd.DataFrame(sub_areas, index=labels, columns=labels)
     matrix_df.index.name = f"From ({t1_year})"
     matrix_df.columns.name = f"To ({t2_year})"
 
-    # Pontius & Millones Net vs. Swap analysis per class
+    # Marginal totals & persistence
     row_totals = sub_areas.sum(axis=1)  # Area at t1
     col_totals = sub_areas.sum(axis=0)  # Area at t2
     diagonal = np.diag(sub_areas)  # Persistence
@@ -113,12 +108,25 @@ def _calculate_interval_metrics(
     losses = row_totals - diagonal
     gains = col_totals - diagonal
     net_change = col_totals - row_totals
-    swap = 2.0 * np.minimum(losses, gains)
-    total_change = losses + gains
+
+    # Pontius & Millones (2011) Quantity and Allocation Disagreement
+    quantity_disagreement = np.abs(gains - losses)
+    allocation_disagreement = 2.0 * np.minimum(losses, gains)  # Equivalent to Swap
+    total_change = losses + gains  # Equal to quantity_disagreement + allocation_disagreement
+
+    # Pontius & Santacruz (2014) Decomposition of Allocation into Exchange and Shift
+    # Pairwise exchange between class i and j: 2 * min(A_ij, A_ji) for i != j
+    pairwise_min = np.minimum(sub_areas, sub_areas.T)
+    np.fill_diagonal(pairwise_min, 0.0)
+    exchange = 2.0 * pairwise_min.sum(axis=1)
+    shift = np.maximum(0.0, allocation_disagreement - exchange)
+
+    # Percentages of total landscape
+    quantity_pct = np.round((quantity_disagreement / total_landscape_ha) * 100.0, 3)
+    allocation_pct = np.round((allocation_disagreement / total_landscape_ha) * 100.0, 3)
 
     # Puyravaud Compound Annual Rate of Change r = (1/dt) * ln(A2 / A1) * 100%
-    # Protect against zero division or log(0)
-    annual_rates = np.zeros(len(all_ids), dtype=np.float64)
+    annual_rates = np.zeros(len(labels), dtype=np.float64)
     for idx, (a1, a2) in enumerate(zip(row_totals, col_totals)):
         if a1 > 0 and a2 > 0:
             annual_rates[idx] = np.round((1.0 / dt) * np.log(a2 / a1) * 100.0, 3)
@@ -133,14 +141,64 @@ def _calculate_interval_metrics(
             "Loss_ha": np.round(losses, 2),
             "Gain_ha": np.round(gains, 2),
             "Net_Change_ha": np.round(net_change, 2),
-            "Swap_ha": np.round(swap, 2),
+            "Quantity_Disagreement_ha": np.round(quantity_disagreement, 2),
+            "Allocation_Disagreement_ha": np.round(allocation_disagreement, 2),
+            "Exchange_ha": np.round(exchange, 2),
+            "Shift_ha": np.round(shift, 2),
+            "Swap_ha": np.round(allocation_disagreement, 2),
             "Total_Change_ha": np.round(total_change, 2),
+            "Quantity_Disagreement_pct": quantity_pct,
+            "Allocation_Disagreement_pct": allocation_pct,
             "Annual_Rate_pct_yr": annual_rates,
         },
         index=labels,
     )
     summary_df.index.name = "Class"
 
+    # Overall Landscape Disagreement (Pontius & Millones 2011: half of sum across categories)
+    overall_Q_ha = float(np.round(0.5 * quantity_disagreement.sum(), 2))
+    overall_A_ha = float(np.round(0.5 * allocation_disagreement.sum(), 2))
+    overall_E_ha = float(np.round(0.5 * exchange.sum(), 2))
+    overall_S_ha = float(np.round(0.5 * shift.sum(), 2))
+    overall_D_ha = float(np.round(overall_Q_ha + overall_A_ha, 2))
+
+    overall_metrics = {
+        "Total_Landscape_ha": float(np.round(total_landscape_ha, 2)),
+        "Overall_Persistence_ha": float(np.round(diagonal.sum(), 2)),
+        "Overall_Quantity_Disagreement_ha": overall_Q_ha,
+        "Overall_Allocation_Disagreement_ha": overall_A_ha,
+        "Overall_Exchange_ha": overall_E_ha,
+        "Overall_Shift_ha": overall_S_ha,
+        "Overall_Total_Disagreement_ha": overall_D_ha,
+        "Overall_Quantity_Disagreement_pct": float(np.round((overall_Q_ha / total_landscape_ha) * 100.0, 3)),
+        "Overall_Allocation_Disagreement_pct": float(np.round((overall_A_ha / total_landscape_ha) * 100.0, 3)),
+        "Overall_Total_Disagreement_pct": float(np.round((overall_D_ha / total_landscape_ha) * 100.0, 3)),
+    }
+
+    return matrix_df, summary_df, overall_metrics
+
+
+def _calculate_interval_metrics(
+    t1_arr: np.ndarray,
+    t2_arr: np.ndarray,
+    classes: Mapping[int, str],
+    pixel_area_ha: float,
+    t1_year: int,
+    t2_year: int,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Compute cross-tabulation, Pontius components, and annual rates."""
+    all_ids = sorted(classes.keys())
+    max_id = max(max(all_ids, default=0), 255)
+    labels = [classes[cid] for cid in all_ids]
+
+    encoded = t1_arr * (max_id + 1) + t2_arr
+    flat_counts = np.bincount(encoded, minlength=(max_id + 1) ** 2)
+    counts_2d = flat_counts.reshape((max_id + 1, max_id + 1))
+    sub_counts = counts_2d[np.ix_(all_ids, all_ids)]
+
+    matrix_df, summary_df, _ = _compute_pontius_summary_tables(
+        sub_counts, labels, pixel_area_ha, t1_year, t2_year
+    )
     return matrix_df, summary_df
 
 
@@ -219,17 +277,142 @@ def _classify_pixel_trajectory_vector(
     water_dyn = np.all(np.isin(u_traj, list(water_river_set)), axis=1)
     u_out[water_dyn] = 7
 
-    # 9. Potential Spurious Noise / Reversal QA Flag:
-    # Example: Built-up -> Forest -> Built-up OR Forest -> Built-up -> Forest
+    # 9. Potential Spurious Noise / Impossible Transition QA Flag:
+    # - Non-Primary Forest -> Primary Forest (1) is ecologically impossible over 5-20 years
+    # - Built-up (16) -> Forest or Agriculture is physically rare / spurious
+    # - 3-step rapid flip-flop back to initial state (e.g. Forest -> Built-up -> Forest)
+    spurious_primary_gain = np.any((u_traj[:, :-1] != 1) & (u_traj[:, 1:] == 1), axis=1)
+    spurious_urban_revert = np.any(
+        (u_traj[:, :-1] == 16) & np.isin(u_traj[:, 1:], [1, 2, 3, 4, 11, 12, 13, 14]),
+        axis=1,
+    )
     if n_epochs >= 3:
-        # Check for rapid flip-flop back to initial state
         flip_back = (u_first == u_last) & (u_traj[:, 1] != u_first)
-        # Built-up abandonment is physically rare in expanding towns
-        spurious_urban = np.any((u_traj[:, :-1] == 16) & (u_traj[:, 1:] == 1), axis=1)
-        u_out[flip_back | spurious_urban] = 9
+        u_out[flip_back | spurious_primary_gain | spurious_urban_revert] = 9
+    else:
+        u_out[spurious_primary_gain | spurious_urban_revert] = 9
 
     out[unstable] = u_out
     return out
+
+
+#: Default ecologically impossible transition pairs (from_class, to_class) for Timor-Leste
+DEFAULT_IMPOSSIBLE_TRANSITIONS: list[TransitionRule] = [
+    # No non-primary class can become Primary Forest (1) within 5-20 years
+    (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1), (9, 1),
+    (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (16, 1), (17, 1), (18, 1),
+    # Built-up (16) does not revert to natural forest or smallholder crops
+    (16, 2), (16, 3), (16, 4), (16, 7), (16, 8), (16, 11), (16, 12), (16, 13), (16, 14),
+]
+
+
+def apply_multi_epoch_transition_consistency(
+    epoch_rasters: Mapping[int, RasterPath],
+    output_dir: RasterPath,
+    forbidden: list[TransitionRule] | None = None,
+    *,
+    anchor: str = "last",
+    replacement_map: Mapping[TransitionRule, int] | None = None,
+    block_size: int = 2048,
+) -> dict[int, Path]:
+    """Cascade impossible-transition consistency corrections across a multi-year raster series.
+
+    Parameters
+    ----------
+    epoch_rasters : Mapping[int, RasterPath]
+        Chronological mapping of year -> classification GeoTIFF path
+        (e.g. {2005: ..., 2015: ..., 2020: ..., 2025: ...}).
+    output_dir : RasterPath
+        Directory where temporally consistent GeoTIFFs will be saved.
+    forbidden : list of (int, int) or None
+        Impossible ``(from_class, to_class)`` transition pairs. Defaults to
+        ``DEFAULT_IMPOSSIBLE_TRANSITIONS``.
+    anchor : str
+        - ``"last"`` (default): Anchors at the most recent epoch (e.g., 2025, where ground
+          truth exists) and propagates corrections backward (2025 -> 2020 -> 2015 -> 2005).
+          For example, if a pixel is Primary Forest (1) in 2025, any earlier year classified
+          as Secondary Forest (2) or Grassland (13) is corrected to Primary Forest (1).
+        - ``"first"``: Anchors at the earliest epoch (e.g., 2005) and propagates forward
+          (2005 -> 2015 -> 2020 -> 2025), reverting impossible later transitions back to t1.
+    replacement_map : Mapping[(int, int), int] or None
+        Optional custom target class overrides for specific forbidden pairs.
+    block_size : int
+        Window streaming block size (default: 2048).
+
+    Returns
+    -------
+    dict[int, Path]
+        Dictionary mapping each year to its temporally consistent GeoTIFF path,
+        ready to pass directly into ``analyze_multi_temporal_transitions()``.
+    """
+    import shutil
+
+    sorted_years = sorted(epoch_rasters.keys())
+    if len(sorted_years) < 2:
+        raise ValueError("At least two epochs are required for multi-epoch consistency.")
+    if anchor not in ("last", "first"):
+        raise ValueError("anchor must be either 'last' or 'first'")
+
+    rules = DEFAULT_IMPOSSIBLE_TRANSITIONS if forbidden is None else forbidden
+    out_folder = Path(output_dir)
+    out_folder.mkdir(parents=True, exist_ok=True)
+
+    consistent_paths: dict[int, Path] = {}
+
+    if anchor == "last":
+        # Anchor at most recent year (e.g. 2025) and cascade backward
+        last_yr = sorted_years[-1]
+        last_src = Path(epoch_rasters[last_yr])
+        last_dst = out_folder / f"{last_src.stem}_consistent.tif"
+        if last_src.resolve() != last_dst.resolve():
+            shutil.copy2(last_src, last_dst)
+        consistent_paths[last_yr] = last_dst
+
+        for i in range(len(sorted_years) - 2, -1, -1):
+            t1_yr = sorted_years[i]
+            t2_yr = sorted_years[i + 1]
+            t1_in = Path(epoch_rasters[t1_yr])
+            t2_ref = consistent_paths[t2_yr]
+            t1_out = out_folder / f"{t1_in.stem}_consistent.tif"
+
+            apply_transition_consistency(
+                t1_path=t1_in,
+                t2_path=t2_ref,
+                output_path=t1_out,
+                forbidden=rules,
+                correction_target="t1",
+                replacement_map=replacement_map,
+                block_size=block_size,
+            )
+            consistent_paths[t1_yr] = t1_out
+    else:
+        # Anchor at earliest year (e.g. 2005) and cascade forward
+        first_yr = sorted_years[0]
+        first_src = Path(epoch_rasters[first_yr])
+        first_dst = out_folder / f"{first_src.stem}_consistent.tif"
+        if first_src.resolve() != first_dst.resolve():
+            shutil.copy2(first_src, first_dst)
+        consistent_paths[first_yr] = first_dst
+
+        for i in range(len(sorted_years) - 1):
+            t1_yr = sorted_years[i]
+            t2_yr = sorted_years[i + 1]
+            t1_ref = consistent_paths[t1_yr]
+            t2_in = Path(epoch_rasters[t2_yr])
+            t2_out = out_folder / f"{t2_in.stem}_consistent.tif"
+
+            apply_transition_consistency(
+                t1_path=t1_ref,
+                t2_path=t2_in,
+                output_path=t2_out,
+                forbidden=rules,
+                correction_target="t2",
+                replacement_map=replacement_map,
+                block_size=block_size,
+            )
+            consistent_paths[t2_yr] = t2_out
+
+    return {yr: consistent_paths[yr] for yr in sorted_years}
 
 
 def analyze_multi_temporal_transitions(
@@ -402,54 +585,22 @@ def analyze_multi_temporal_transitions(
     if out_csv:
         out_csv.mkdir(parents=True, exist_ok=True)
 
+    overall_rows = []
     for i in range(n_intervals):
         y_start = sorted_years[i]
         y_end = sorted_years[i + 1]
         dt = y_end - y_start
 
         sub_counts = interval_counts[i][np.ix_(all_ids, all_ids)]
-        sub_areas = np.round(sub_counts * pixel_area_ha, 4)
-
-        mat_df = pd.DataFrame(sub_areas, index=labels, columns=labels)
-        mat_df.index.name = f"From ({y_start})"
-        mat_df.columns.name = f"To ({y_end})"
-
-        row_t = sub_areas.sum(axis=1)
-        col_t = sub_areas.sum(axis=0)
-        diag = np.diag(sub_areas)
-        loss = row_t - diag
-        gain = col_t - diag
-        net = col_t - row_t
-        swap = 2.0 * np.minimum(loss, gain)
-        tot = loss + gain
-
-        rates = np.zeros(len(all_ids), dtype=np.float64)
-        for idx, (a1, a2) in enumerate(zip(row_t, col_t)):
-            rates[idx] = (
-                np.round((1.0 / dt) * np.log(a2 / a1) * 100.0, 3)
-                if (a1 > 0 and a2 > 0)
-                else 0.0
-            )
-
-        sum_df = pd.DataFrame(
-            {
-                f"Area_{y_start}_ha": np.round(row_t, 2),
-                f"Area_{y_end}_ha": np.round(col_t, 2),
-                "Persistence_ha": np.round(diag, 2),
-                "Loss_ha": np.round(loss, 2),
-                "Gain_ha": np.round(gain, 2),
-                "Net_Change_ha": np.round(net, 2),
-                "Swap_ha": np.round(swap, 2),
-                "Total_Change_ha": np.round(tot, 2),
-                "Annual_Rate_pct_yr": rates,
-            },
-            index=labels,
+        mat_df, sum_df, overall_metrics = _compute_pontius_summary_tables(
+            sub_counts, labels, pixel_area_ha, y_start, y_end
         )
-        sum_df.index.name = "Class"
 
         if out_csv:
             mat_df.to_csv(out_csv / f"transitions_{y_start}_{y_end}_matrix.csv")
             sum_df.to_csv(out_csv / f"transitions_{y_start}_{y_end}_summary.csv")
+
+        overall_rows.append({"Period": f"{y_start}-{y_end}", **overall_metrics})
 
         interval_summaries.append(
             IntervalTransitionSummary(
@@ -458,6 +609,7 @@ def analyze_multi_temporal_transitions(
                 interval_years=float(dt),
                 transition_matrix_ha=mat_df,
                 class_summary_ha=sum_df,
+                overall_disagreement=overall_metrics,
             )
         )
 
@@ -466,48 +618,18 @@ def analyze_multi_temporal_transitions(
     y_last = sorted_years[-1]
     dt_net = y_last - y_first
     net_sub_counts = net_counts[np.ix_(all_ids, all_ids)]
-    net_sub_areas = np.round(net_sub_counts * pixel_area_ha, 4)
-
-    net_mat_df = pd.DataFrame(net_sub_areas, index=labels, columns=labels)
-    net_mat_df.index.name = f"From ({y_first})"
-    net_mat_df.columns.name = f"To ({y_last})"
-
-    row_n = net_sub_areas.sum(axis=1)
-    col_n = net_sub_areas.sum(axis=0)
-    diag_n = np.diag(net_sub_areas)
-    loss_n = row_n - diag_n
-    gain_n = col_n - diag_n
-    net_diff = col_n - row_n
-    swap_n = 2.0 * np.minimum(loss_n, gain_n)
-    tot_n = loss_n + gain_n
-
-    net_rates = np.zeros(len(all_ids), dtype=np.float64)
-    for idx, (a1, a2) in enumerate(zip(row_n, col_n)):
-        net_rates[idx] = (
-            np.round((1.0 / dt_net) * np.log(a2 / a1) * 100.0, 3)
-            if (a1 > 0 and a2 > 0)
-            else 0.0
-        )
-
-    net_sum_df = pd.DataFrame(
-        {
-            f"Area_{y_first}_ha": np.round(row_n, 2),
-            f"Area_{y_last}_ha": np.round(col_n, 2),
-            "Persistence_ha": np.round(diag_n, 2),
-            "Loss_ha": np.round(loss_n, 2),
-            "Gain_ha": np.round(gain_n, 2),
-            "Net_Change_ha": np.round(net_diff, 2),
-            "Swap_ha": np.round(swap_n, 2),
-            "Total_Change_ha": np.round(tot_n, 2),
-            "Annual_Rate_pct_yr": net_rates,
-        },
-        index=labels,
+    net_mat_df, net_sum_df, net_overall_metrics = _compute_pontius_summary_tables(
+        net_sub_counts, labels, pixel_area_ha, y_first, y_last
     )
-    net_sum_df.index.name = "Class"
+
+    overall_rows.append({"Period": f"{y_first}-{y_last} (Net)", **net_overall_metrics})
 
     if out_csv:
         net_mat_df.to_csv(out_csv / f"transitions_{y_first}_{y_last}_net_matrix.csv")
         net_sum_df.to_csv(out_csv / f"transitions_{y_first}_{y_last}_net_summary.csv")
+        pd.DataFrame(overall_rows).set_index("Period").to_csv(
+            out_csv / "pontius_overall_disagreement_summary.csv"
+        )
 
     net_summary = IntervalTransitionSummary(
         t1=y_first,
@@ -515,6 +637,7 @@ def analyze_multi_temporal_transitions(
         interval_years=float(dt_net),
         transition_matrix_ha=net_mat_df,
         class_summary_ha=net_sum_df,
+        overall_disagreement=net_overall_metrics,
     )
 
     # Trajectory Summary DataFrame

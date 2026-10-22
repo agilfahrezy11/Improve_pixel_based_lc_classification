@@ -39,7 +39,7 @@ MMU_TABLE: dict[int, int] = {
 #: Critical linear and narrow classes (Mangrove, Settlements, Waterbodies, Dry riverbed)
 #: are protected with min_size=0, while gentle clean-up (5-20 pixels) is applied to vegetation.
 DEFAULT_HYBRID_MMU_TABLE: dict[int, int] = {
-     1: 50,   #primary forest (0.50 ha)
+    1: 50,   #primary forest (0.50 ha)
     2: 30,   #secondary forest (0.30 ha)
     3: 20,   #mangrove forest (0.20)
     4: 30,   #coastal forest 
