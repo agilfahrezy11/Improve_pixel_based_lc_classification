@@ -4,3 +4,6 @@
 /output
 /src/ml_lc_classifier.egg-info
 /tests/__pycache__
+/.agents
+/.vscode
+/docs/agents

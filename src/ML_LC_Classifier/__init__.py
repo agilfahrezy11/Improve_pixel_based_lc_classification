@@ -76,8 +76,20 @@ from .seam_healing import (
     heal_probability_seams,
     heal_raster_seams,
 )
+from .accuracy_assessment import (
+    DEFAULT_TIMOR_17_SCHEMA,
+    ThematicAccuracyResult,
+    assess_map_accuracy,
+    compute_thematic_accuracy,
+    count_raster_pixels_streaming,
+)
 
 __all__ = [
+    "DEFAULT_TIMOR_17_SCHEMA",
+    "ThematicAccuracyResult",
+    "assess_map_accuracy",
+    "compute_thematic_accuracy",
+    "count_raster_pixels_streaming",
     "heal_raster_seams",
     "heal_array_seams",
     "heal_probability_seams",
