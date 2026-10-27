@@ -1,17 +1,13 @@
 """Multi-temporal trajectory analysis, annualized change rates, and eco-functional change mapping.
-
 Designed for multi-epoch land cover time series (e.g. 2005, 2015, 2020, 2025)
-in Timor-Leste and tropical smallholder landscapes.
 """
 
 from __future__ import annotations
-
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from os import PathLike
 from pathlib import Path
 from typing import Any
-
 import numpy as np
 import pandas as pd
 import rasterio
@@ -25,7 +21,7 @@ from .lc_post_process import (
 
 RasterPath = str | PathLike[str]
 
-#: Extended 18-class dictionary including Dry_riverbed (Class 18)
+#default class, change accordingly
 DEFAULT_TIMOR_18_CLASSES: dict[int, str] = {
     1: "Primary_forest",
     2: "Secondary_forest",
@@ -47,7 +43,8 @@ DEFAULT_TIMOR_18_CLASSES: dict[int, str] = {
     18: "Dry_riverbed",
 }
 
-#: Trajectory code definitions for multi-year landscape dynamics
+#Trajectory code definitions for multi-year landscape dynamics
+#can be modified later
 TRAJECTORY_CLASSES: dict[int, str] = {
     1: "Persistent / Stable Matrix",
     2: "Unidirectional Forest Loss",
@@ -290,7 +287,7 @@ def _classify_pixel_trajectory_vector(
         flip_back = (u_first == u_last) & (u_traj[:, 1] != u_first)
         u_out[flip_back | spurious_primary_gain | spurious_urban_revert] = 9
     else:
-        u_out[spurious_primary_gain | spurious_urban_revert] = 9
+        u_out[spurious_primary_gain | spurious_urban_revert] = 9 # type: ignore
 
     out[unstable] = u_out
     return out
@@ -304,6 +301,157 @@ DEFAULT_IMPOSSIBLE_TRANSITIONS: list[TransitionRule] = [
     # Built-up (16) does not revert to natural forest or smallholder crops
     (16, 2), (16, 3), (16, 4), (16, 7), (16, 8), (16, 11), (16, 12), (16, 13), (16, 14),
 ]
+
+#: 26 Forward Consistency Rules (T2 <- T1): Permanently locks Built-up (16) and suppresses false Teak (5)
+FORWARD_CONSISTENCY_RULES: list[TransitionRule] = [
+    # A. Built-up (16) permanently locked (cannot revert to vegetation/water) [15 rules]
+    (16, 1), (16, 2), (16, 3), (16, 4), (16, 5), (16, 6), (16, 7), (16, 8),
+    (16, 9), (16, 10), (16, 11), (16, 12), (16, 13), (16, 14), (16, 17),
+    
+    # B. TEAK OVERESTIMATION FIX: Non-teak cannot become Teak in later epochs [11 rules]
+    (3, 5),   # Mangrove -> Teak
+    (4, 5),   # Coastal Forest -> Teak
+    (6, 5),   # Eucalyptus Plantation -> Teak
+    (7, 5),   # Coffee Agroforestry -> Teak
+    (8, 5),   # Cacao Agroforestry -> Teak
+    (9, 5),   # Coconut Agroforestry -> Teak
+    (10, 5),  # Mixed Garden -> Teak
+    (11, 5),  # Paddy Field -> Teak
+    (12, 5),  # Other Cropland -> Teak
+    (13, 5),  # Grassland -> Teak
+    (17, 5),  # Waterbody -> Teak
+]
+
+#: 70+ Backward Consistency Rules (T1 <- T2): Protects climax vegetation and cleans historical shadows/false teak
+BACKWARD_CONSISTENCY_RULES: list[TransitionRule] = [
+    # 1. Any non-primary -> Primary Forest (1) [16 rules]
+    (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1), (9, 1),
+    (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1), (16, 1), (17, 1),
+    
+    # 2. Any non-mangrove -> Mangrove Forest (3) [13 rules]
+    (1, 3), (2, 3), (4, 3), (5, 3), (6, 3), (7, 3), (8, 3), (9, 3),
+    (10, 3), (11, 3), (12, 3), (13, 3), (16, 3),
+    
+    # 3. Transitions into Coastal Forest (4) [10 rules]
+    (1, 4), (2, 4), (3, 4), (5, 4), (6, 4), (7, 4), (8, 4),
+    (10, 4), (11, 4), (12, 4),
+    
+    # 4. Transitions from Mangrove into inland agriculture [9 rules]
+    (3, 2), (3, 6), (3, 7), (3, 8), (3, 9), (3, 10), (3, 12), (3, 13), (3, 4),
+    
+    # 5. Transitions from Coastal Forest into inland plantations [4 rules]
+    (4, 2), (4, 6), (4, 7), (4, 8),
+    
+    # 6. Cleared Land / Paddy into inland forest [3 rules]
+    (11, 2), (11, 4), (15, 2),
+
+    # 7. Historical Water/Shadows (17) -> Terrestrial vegetation in later years [10 rules]
+    (17, 2), (17, 4), (17, 6), (17, 7), (17, 8), (17, 9),
+    (17, 10), (17, 12), (17, 13), (17, 14),
+
+    # 8. Transitions from earlier Teak (5) into Verified Agriculture [7 rules]
+    (5, 7), (5, 8), (5, 9), (5, 10), (5, 11), (5, 12), (5, 13),
+
+    # 9. Coconut (9) into Eucalyptus / Coffee [2 rules]
+    (9, 6), (9, 7),
+]
+
+
+def apply_bidirectional_multi_epoch_consistency(
+    epoch_rasters: Mapping[int, RasterPath],
+    output_dir: RasterPath,
+    backward_rules: Sequence[TransitionRule] | None = None,
+    forward_rules: Sequence[TransitionRule] | None = None,
+    block_size: int = 2048,
+) -> dict[int, Path]:
+    """Execute streaming bidirectional temporal consistency across all multi-epoch rasters.
+
+    Applies:
+      1. Backward Cascade (2025 -> 2020 -> 2015 -> 2005): Later ground truth cleans earlier noise,
+         restores climax primary/coastal/mangrove forests, and cleans historical mountain shadows.
+      2. Forward Cascade (2005 -> 2015 -> 2020 -> 2025): Earlier established infrastructure
+         (Built-up) locks forward permanently and suppresses recent false Teak overestimations.
+    """
+    sorted_years = sorted(epoch_rasters.keys())
+    n_epochs = len(sorted_years)
+    if n_epochs < 2:
+        raise ValueError("At least two temporal epochs are required for multi-epoch consistency.")
+
+    out_folder = Path(output_dir)
+    out_folder.mkdir(parents=True, exist_ok=True)
+
+    b_set = set(BACKWARD_CONSISTENCY_RULES if backward_rules is None else backward_rules)
+    f_set = set(FORWARD_CONSISTENCY_RULES if forward_rules is None else forward_rules)
+
+    src_paths = [Path(epoch_rasters[yr]) for yr in sorted_years]
+    readers = [rasterio.open(p) for p in src_paths]
+
+    base_src = readers[0]
+    height, width = base_src.height, base_src.width
+    meta = base_src.profile.copy()
+    meta.update(
+        count=1,
+        dtype=rasterio.uint8,
+        compress="deflate",
+        tiled=True,
+        blockxsize=512,
+        blockysize=512,
+    )
+
+    out_paths: dict[int, Path] = {}
+    for yr, p in zip(sorted_years, src_paths):
+        out_paths[yr] = out_folder / f"{p.stem.replace('_Filtered', '')}_consistent.tif"
+
+    qa_summary_path = out_folder / "Landsat_multiepoch_QA_flag.tif"
+    writers = [rasterio.open(out_paths[yr], "w", **meta) for yr in sorted_years]
+    qa_writer = rasterio.open(qa_summary_path, "w", **meta)
+
+    try:
+        for y0 in range(0, height, block_size):
+            y1 = min(y0 + block_size, height)
+            for x0 in range(0, width, block_size):
+                x1 = min(x0 + block_size, width)
+                win = rasterio.windows.Window(x0, y0, x1 - x0, y1 - y0)
+
+                blocks = [r.read(1, window=win) for r in readers]
+                qa_block = np.zeros((y1 - y0, x1 - x0), dtype=np.uint8)
+
+                valid_mask = np.ones((y1 - y0, x1 - x0), dtype=bool)
+                for b in blocks:
+                    valid_mask &= (b > 0)
+
+                # 1. Backward Cascade (latest down to earliest)
+                for i in range(n_epochs - 1, 0, -1):
+                    b_earlier = blocks[i - 1]
+                    b_later = blocks[i]
+                    for (from_c, to_c) in b_set:
+                        m = (b_earlier == from_c) & (b_later == to_c) & valid_mask
+                        if np.any(m):
+                            b_earlier[m] = to_c
+                            qa_block[m] |= 1
+
+                # 2. Forward Cascade (earliest up to latest)
+                for i in range(0, n_epochs - 1):
+                    b_earlier = blocks[i]
+                    b_later = blocks[i + 1]
+                    for (from_c, to_c) in f_set:
+                        m = (b_earlier == from_c) & (b_later == to_c) & valid_mask
+                        if np.any(m):
+                            b_later[m] = from_c
+                            qa_block[m] |= 2
+
+                for w, b in zip(writers, blocks):
+                    w.write(b, 1, window=win)
+                qa_writer.write(qa_block, 1, window=win)
+
+    finally:
+        for r in readers:
+            r.close()
+        for w in writers:
+            w.close()
+        qa_writer.close()
+
+    return out_paths
 
 
 def apply_multi_epoch_transition_consistency(
@@ -507,7 +655,7 @@ def analyze_multi_temporal_transitions(
             y1 = min(y0 + block_size, height)
             for x0 in range(0, width, block_size):
                 x1 = min(x0 + block_size, width)
-                win = rasterio.windows.Window(x0, y0, x1 - x0, y1 - y0)
+                win = rasterio.windows.Window(x0, y0, x1 - x0, y1 - y0) # type: ignore
 
                 # Read window from all epoch rasters
                 blocks = [r.read(1, window=win, masked=True) for r in readers]
@@ -572,7 +720,7 @@ def analyze_multi_temporal_transitions(
                     traj_writer.write(block_out, 1, window=win)
 
     finally:
-        for r in readers:
+        for r in readers: # type: ignore
             r.close()
         if traj_writer is not None:
             traj_writer.close()
@@ -723,7 +871,7 @@ def export_multi_epoch_sankey(
         for from_cls in mat.index:
             for to_cls in mat.columns:
                 val = mat.loc[from_cls, to_cls]
-                if val >= min_area_ha:
+                if val >= min_area_ha: # type: ignore
                     s_id = node_map[(e_idx, from_cls)]
                     t_id = node_map[(e_idx + 1, to_cls)]
                     sources.append(s_id)

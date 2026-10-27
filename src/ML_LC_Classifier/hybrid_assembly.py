@@ -492,11 +492,21 @@ def process_tile(
                         dst_ci.write(np.zeros((win_write_h, win_write_w), dtype=np.float32), 1, window=win_write)
                         continue
 
-                    # 1. Localize clamped pixels (2,147,483,647) to distinct connected components
+                    # 1. Localize clamped pixels (2,147,483,647) to distinct connected components.
+                    #    If a connected component of 2,147,483,647 is larger than 400 pixels, multiple
+                    #    adjacent SNIC segments have fused together due to int32 clamping (e.g. ocean
+                    #    fused with coastal forest/urban). For these fused mega-clusters, fall back
+                    #    to pure pixel probabilities (seg_block = 0) so ocean water never floods land.
                     is_clamp = seg_block == 2147483647
                     if np.any(is_clamp):
-                        labeled, _ = label(is_clamp)
-                        seg_block[is_clamp] = -2000000000 - labeled[is_clamp]
+                        labeled, n_comp = label(is_clamp)
+                        if n_comp > 0:
+                            comp_sizes = np.bincount(labeled.ravel())
+                            # Components > 400 px are fused overflow mega-polygons -> pure pixel fallback (0)
+                            oversized_mask = comp_sizes[labeled] > 400
+                            valid_clamp = is_clamp & (~oversized_mask)
+                            seg_block[is_clamp & oversized_mask] = 0
+                            seg_block[valid_clamp] = -2000000000 - labeled[valid_clamp]
 
                     # 2. Heal thin 1-4px zero seams and gaps in segments within valid data regions
                     seg_block = heal_array_seams(seg_block, nodata=0, max_seam_width=4)
