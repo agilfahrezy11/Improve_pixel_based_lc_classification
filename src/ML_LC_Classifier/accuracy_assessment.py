@@ -1,10 +1,11 @@
-"""Thematic accuracy assessment and error adjusted area estimation.
+"""Thematic accuracy assessment and error-adjusted area estimation.
 
-Implements:
-1. Sample-based and area-weighted confusion matrices 
+A generic, project-agnostic module implementing:
+1. Sample-based and area-weighted confusion matrices (Map rows x Reference columns,
+   matching AcATaMa and Olofsson et al., 2014).
 2. Overall Accuracy (OA), User's Accuracy (UA / Precision), Producer's Accuracy
    (PA / Recall), Specificity, Omission & Commission Errors, with Standard Errors (SE)
-   and 95% Confidence Intervals.
+   and Confidence Intervals (default 95%).
 3. Class-imbalance metrics:
    - Per-class & Macro/Weighted/Micro F1-Score
    - Per-class & Macro/Weighted G-Mean (sqrt(Sensitivity * Specificity))
@@ -16,8 +17,8 @@ Implements:
    - Area proportions matrix (p_ij = W_i * n_ij / n_i.)
    - Error-adjusted area (ha and km2) per class
    - Standard Error (SE), 95% Confidence Interval (CI), and Coefficient of Variation (CV)
-5. Multi-temporal CCDC stability filtering support (e.g. stable_2020 == 1,
-   stable_2015 == 1, stable_2005 == 1) 
+5. Multi-temporal stability filtering support (e.g. filtering reference samples
+   by an arbitrary column such as 'stable_2020', 'is_stable', etc.).
 """
 
 from __future__ import annotations
@@ -44,13 +45,7 @@ from sklearn.metrics import (
     matthews_corrcoef,
 )
 
-from .trajectory_analysis import DEFAULT_TIMOR_18_CLASSES
-
 PathType = str | PathLike[str]
-
-DEFAULT_TIMOR_17_SCHEMA: dict[int, str] = {
-    k: v for k, v in DEFAULT_TIMOR_18_CLASSES.items() if k != 18
-}
 
 
 @dataclass
@@ -61,18 +56,18 @@ class ThematicAccuracyResult:
     ----------
     overall_metrics : dict[str, float]
         Dictionary of global accuracy & imbalance metrics:
-        - ``overall_accuracy_sample`` and ``overall_accuracy_sample_se`` / ``ci95``
-        - ``overall_accuracy_area_weighted`` and ``overall_accuracy_area_se`` / ``ci95``
+        - ``overall_accuracy_sample`` and ``overall_accuracy_sample_se`` / ``ci``
+        - ``overall_accuracy_area_weighted`` and ``overall_accuracy_area_se`` / ``ci``
           (Olofsson et al. 2014 Eq. 4 & 5, when raster / mapped pixel counts are provided)
         - ``balanced_accuracy``
         - ``f1_macro``, ``f1_weighted``, ``f1_micro``
-        - ``g_mean_macro``, ``g_mean_weighted``, ``g_mean_multiclass``
+        - ``g_mean_macro``, ``g_mean_weighted``, ``g_mean_multiclass_recall``
         - ``fowlkes_mallows_macro``, ``fowlkes_mallows_weighted``
         - ``kappa``, ``mcc``
-        - ``total_samples``, ``num_classes``
+        - ``total_samples``, ``num_classes_evaluated``
     class_metrics : pd.DataFrame
         Per-class accuracy, imbalance, and (when mapped counts are available)
-        AcATaMa / Olofsson error-adjusted area table with SE, 95% CI, and CV.
+        AcATaMa / Olofsson error-adjusted area table with SE, CI, and CV.
     confusion_matrix_counts : pd.DataFrame
         Sample error matrix (Rows = Map Class i, Columns = Reference Class j,
         plus row totals ``n_i.`` and column totals ``n_.j``).
@@ -177,7 +172,7 @@ def count_raster_pixels_streaming(
     nodata_values : sequence of numbers, default (0, -1, 255)
         Pixel values to exclude as background / nodata (in addition to ``src.nodata``).
     class_remap : Mapping[int, int] or None
-        Optional dictionary mapping raw pixel codes to target class IDs (e.g., ``{18: 17}``).
+        Optional dictionary mapping raw pixel codes to target class IDs.
     block_size : int, default 2048
         Window size for out-of-core reading.
 
@@ -234,7 +229,6 @@ def compute_thematic_accuracy(
     mapped_pixel_counts: Mapping[int, int] | None = None,
     pixel_area_m2: float | None = None,
     confidence_level: float = 0.95,
-    merge_water_riverbed: bool = True,
     class_remap: Mapping[int, int] | None = None,
 ) -> ThematicAccuracyResult:
     """Compute thematic accuracy, class-imbalance metrics, and AcATaMa/Olofsson area estimates.
@@ -251,8 +245,8 @@ def compute_thematic_accuracy(
     y_pred : array-like of int
         Predicted (map) class IDs at the reference locations.
     class_names : Mapping[int, str] or None
-        Dictionary mapping integer class IDs to human-readable class names.
-        Defaults to Timor-Leste 17/18-class schema when omitted.
+        Optional dictionary mapping integer class IDs to human-readable class names.
+        If omitted, defaults to ``Class_<id>``.
     labels : sequence of int or None
         Explicit ordered list of class IDs to include in the evaluation.
     mapped_pixel_counts : Mapping[int, int] or None
@@ -260,16 +254,12 @@ def compute_thematic_accuracy(
         classified raster. Required for AcATaMa / Olofsson et al. (2014) area-weighted
         accuracies and error-adjusted area estimation.
     pixel_area_m2 : float or None
-        Area of a single raster pixel in square meters (e.g. ``900.0`` for 30 m Landsat,
-        ``100.0`` for 10 m Sentinel-2). Used to convert pixel counts into hectares (ha)
-        and square kilometers (km²).
+        Area of a single raster pixel in square meters. Used to convert pixel counts
+        into hectares (ha) and square kilometers (km²).
     confidence_level : float, default 0.95
         Confidence level for standard-error confidence intervals (e.g. 0.95 -> z = 1.96).
-    merge_water_riverbed : bool, default True
-        If True, automatically merges Class 18 (``Dry_riverbed``) into Class 17
-        (``Waterbody``) in both ``y_true``, ``y_pred``, and ``mapped_pixel_counts``.
     class_remap : Mapping[int, int] or None
-        Additional custom class ID remapping applied before computing metrics.
+        Optional custom class ID remapping applied before computing metrics.
 
     Returns
     -------
@@ -285,12 +275,7 @@ def compute_thematic_accuracy(
     if len(y_true_arr) == 0:
         raise ValueError("Cannot compute accuracy on empty sample arrays.")
 
-    remap: dict[int, int] = {}
-    if merge_water_riverbed:
-        remap[18] = 17
-    if class_remap:
-        for k, v in class_remap.items():
-            remap[int(k)] = int(v)
+    remap = {int(k): int(v) for k, v in class_remap.items()} if class_remap else {}
 
     if remap:
         y_true_arr = y_true_arr.copy()
@@ -309,17 +294,7 @@ def compute_thematic_accuracy(
                 continue
             mapped_counts_clean[cid_int] = mapped_counts_clean.get(cid_int, 0) + int(cnt)
 
-    # Resolve class schema & ordered label list
-    if class_names is None:
-        schema = (
-            DEFAULT_TIMOR_17_SCHEMA
-            if merge_water_riverbed
-            else DEFAULT_TIMOR_18_CLASSES
-        )
-    else:
-        schema = {int(k): str(v) for k, v in class_names.items()}
-        if merge_water_riverbed and 18 in schema and 18 in remap:
-            schema = {k: v for k, v in schema.items() if k != 18}
+    schema = {int(k): str(v) for k, v in class_names.items()} if class_names else {}
 
     if labels is not None:
         class_list = sorted({remap.get(int(c), int(c)) for c in labels})
@@ -327,7 +302,7 @@ def compute_thematic_accuracy(
         observed = set(np.unique(y_true_arr).tolist()) | set(np.unique(y_pred_arr).tolist())
         if mapped_counts_clean is not None:
             observed |= set(mapped_counts_clean.keys())
-        if class_names is not None:
+        if schema:
             observed |= set(schema.keys())
         class_list = sorted(c for c in observed if c > 0)
 
@@ -388,7 +363,6 @@ def compute_thematic_accuracy(
         pa_sample_se = np.sqrt(pa_sample_var)
 
         # Specificity (True Negative Rate): TN_c / (TN_c + FP_c)
-        # For class c: TP = diag_ii[c], FP = n_i_dot[c] - TP, FN = n_dot_j[c] - TP
         fp_c = n_i_dot - diag_ii
         fn_c = n_dot_j - diag_ii
         tn_c = n_total - (diag_ii + fp_c + fn_c)
@@ -405,10 +379,10 @@ def compute_thematic_accuracy(
             np.isnan(ua_sample) & np.isnan(pa_sample), np.nan, np.nan_to_num(f1_per_class, nan=0.0)
         )
 
-        # G-Mean (Sensitivity * Specificity)^0.5 — standard binary-per-class imbalance metric
+        # G-Mean: sqrt(Sensitivity * Specificity)
         g_mean_per_class = np.sqrt(np.clip(pa_sample, 0.0, 1.0) * np.clip(specificity, 0.0, 1.0))
 
-        # Fowlkes-Mallows Index: sqrt(UA * PA) — geometric mean of Precision and Recall
+        # Fowlkes-Mallows Index: sqrt(UA * PA)
         fm_per_class = np.sqrt(
             np.clip(np.nan_to_num(ua_sample, nan=0.0), 0.0, 1.0)
             * np.clip(np.nan_to_num(pa_sample, nan=0.0), 0.0, 1.0)
@@ -455,7 +429,7 @@ def compute_thematic_accuracy(
     overall_metrics: dict[str, float] = {
         "overall_accuracy_sample": oa_sample,
         "overall_accuracy_sample_se": oa_sample_se,
-        "overall_accuracy_sample_ci95": z_score * oa_sample_se,
+        "overall_accuracy_sample_ci": z_score * oa_sample_se,
         "balanced_accuracy": float(balanced_accuracy_score(y_true_arr, y_pred_arr)),
         "f1_macro": float(f1_score(y_true_arr, y_pred_arr, average="macro", zero_division=0)),
         "f1_weighted": float(f1_score(y_true_arr, y_pred_arr, average="weighted", zero_division=0)),
@@ -489,7 +463,7 @@ def compute_thematic_accuracy(
                 "correct_samples": int(diag_ii[idx]),
                 "user_accuracy": float(ua_sample[idx]) if np.isfinite(ua_sample[idx]) else np.nan,
                 "user_accuracy_se": float(ua_sample_se[idx]) if np.isfinite(ua_sample_se[idx]) else np.nan,
-                "user_accuracy_ci95": (
+                "user_accuracy_ci": (
                     float(z_score * ua_sample_se[idx]) if np.isfinite(ua_sample_se[idx]) else np.nan
                 ),
                 "commission_error": (
@@ -539,7 +513,7 @@ def compute_thematic_accuracy(
 
         overall_metrics["overall_accuracy_area_weighted"] = oa_area
         overall_metrics["overall_accuracy_area_se"] = oa_area_se
-        overall_metrics["overall_accuracy_area_ci95"] = z_score * oa_area_se
+        overall_metrics["overall_accuracy_area_ci"] = z_score * oa_area_se
         overall_metrics["total_mapped_pixels"] = int(N_total)
 
         # 2. Area-weighted Producer's Accuracy (Olofsson Eq. 3 & 7)
@@ -550,8 +524,6 @@ def compute_thematic_accuracy(
         for j in range(q):
             if p_dot_j[j] <= 0 or not np.isfinite(pa_area[j]):
                 continue
-            # Olofsson et al. (2014) Eq. 7:
-            # V(P_j) = (1 / p_.j^2) * sum_i [ W_i^2 * q_ij * (1 - q_ij) / (n_i. - 1) * (delta_ij - P_j)^2 ]
             delta_j = np.zeros(q, dtype=np.float64)
             delta_j[j] = 1.0
             var_pj = np.sum(cell_var_ij[:, j] * ((delta_j - pa_area[j]) ** 2)) / (p_dot_j[j] ** 2)
@@ -585,7 +557,7 @@ def compute_thematic_accuracy(
             row["producer_accuracy_area_se"] = (
                 float(pa_area_se[idx]) if np.isfinite(pa_area_se[idx]) else np.nan
             )
-            row["producer_accuracy_area_ci95"] = (
+            row["producer_accuracy_area_ci"] = (
                 float(z_score * pa_area_se[idx]) if np.isfinite(pa_area_se[idx]) else np.nan
             )
             row["omission_error_area"] = (
@@ -597,35 +569,34 @@ def compute_thematic_accuracy(
                 float(cv_area[idx]) if np.isfinite(cv_area[idx]) else np.nan
             )
 
-            # Adjusted pixel count (matches Table 5 in Gatis et al. 2022)
             row["adjusted_pixels"] = float(N_total * p_dot_j[idx])
             row["adjusted_pixels_se"] = float(N_total * p_dot_j_se[idx])
-            row["adjusted_pixels_ci95"] = float(z_score * N_total * p_dot_j_se[idx])
+            row["adjusted_pixels_ci"] = float(z_score * N_total * p_dot_j_se[idx])
 
             if pixel_area_m2 is not None:
                 mapped_ha = float(N_i[idx] * pix_ha)
                 adj_ha = float(total_area_ha * p_dot_j[idx])
                 se_ha = float(total_area_ha * p_dot_j_se[idx])
-                ci95_ha = float(z_score * se_ha)
+                ci_ha = float(z_score * se_ha)
 
                 mapped_km2 = float(N_i[idx] * pix_km2)
                 adj_km2 = float(total_area_km2 * p_dot_j[idx])
                 se_km2 = float(total_area_km2 * p_dot_j_se[idx])
-                ci95_km2 = float(z_score * se_km2)
+                ci_km2 = float(z_score * se_km2)
 
                 row["mapped_area_ha"] = mapped_ha
                 row["adjusted_area_ha"] = adj_ha
                 row["adjusted_area_se_ha"] = se_ha
-                row["adjusted_area_ci95_ha"] = ci95_ha
-                row["adjusted_area_lower_ha"] = max(0.0, adj_ha - ci95_ha)
-                row["adjusted_area_upper_ha"] = adj_ha + ci95_ha
+                row["adjusted_area_ci_ha"] = ci_ha
+                row["adjusted_area_lower_ha"] = max(0.0, adj_ha - ci_ha)
+                row["adjusted_area_upper_ha"] = adj_ha + ci_ha
 
                 row["mapped_area_km2"] = mapped_km2
                 row["adjusted_area_km2"] = adj_km2
                 row["adjusted_area_se_km2"] = se_km2
-                row["adjusted_area_ci95_km2"] = ci95_km2
-                row["adjusted_area_lower_km2"] = max(0.0, adj_km2 - ci95_km2)
-                row["adjusted_area_upper_km2"] = adj_km2 + ci95_km2
+                row["adjusted_area_ci_km2"] = ci_km2
+                row["adjusted_area_lower_km2"] = max(0.0, adj_km2 - ci_km2)
+                row["adjusted_area_upper_km2"] = adj_km2 + ci_km2
 
         # Build Area Proportions Confusion Matrix DataFrame
         cm_area_prop_df = pd.DataFrame(
@@ -656,14 +627,15 @@ def compute_thematic_accuracy(
 def _extract_reference_and_map_labels(
     raster_path: PathType,
     reference_data: PathType | gpd.GeoDataFrame,
-    class_field: str = "new_id",
+    class_field: str = "class_id",
     *,
+    class_name_field: str | None = None,
     band: int = 1,
-    stability_col: str | None = None,
-    stability_val: int | float = 1,
+    filter_col: str | None = None,
+    filter_val: Any = 1,
     polygon_mode: str = "majority",
     nodata_values: Sequence[int | float] = (0, -1, 255),
-) -> gpd.GeoDataFrame:
+) -> tuple[gpd.GeoDataFrame, dict[int, str]]:
     """Extract map predictions at reference vector geometries (Points or Polygons).
 
     Parameters
@@ -672,23 +644,29 @@ def _extract_reference_and_map_labels(
         Path to classified single-band thematic GeoTIFF.
     reference_data : str, PathLike, or GeoDataFrame
         Path to GeoJSON/Shapefile/GeoPackage or loaded GeoDataFrame.
-    class_field : str, default 'new_id'
+    class_field : str, default 'class_id'
         Column containing reference ground-truth integer class IDs.
+    class_name_field : str or None
+        Optional column in ``reference_data`` containing human-readable class names
+        (e.g., 'class_name', 'label', 'new_class').
     band : int, default 1
         Band index in classified raster.
-    stability_col : str or None
-        Optional CCDC stability flag column (e.g., ``'stable_2020'``, ``'stable_2015'``,
-        ``'stable_2005'``). When specified, only rows where ``row[stability_col] == stability_val``
-        are retained.
-    stability_val : int or float, default 1
-        Target value for ``stability_col``.
+    filter_col : str or None
+        Optional column name used to filter reference data (e.g. 'stable_2020',
+        'is_stable', 'split').
+    filter_val : Any, default 1
+        Target value to keep in ``filter_col``.
     polygon_mode : {'majority', 'all_pixels', 'centroid'}, default 'majority'
-        How polygon reference features are evaluated against the raster:
-        - ``'majority'``: modal valid predicted class inside the polygon (1 sample unit per polygon).
-        - ``'centroid'``: samples the pixel at each polygon's representative point / centroid.
-        - ``'all_pixels'``: expands each polygon into individual valid pixels.
+        How polygon reference features are evaluated against the raster.
     nodata_values : sequence of numbers
         Invalid raster values to ignore.
+
+    Returns
+    -------
+    gdf : GeoDataFrame
+        Extracted points with ``ref_class`` and ``map_class`` columns.
+    discovered_names : dict[int, str]
+        Class ID to class name mapping extracted from ``class_name_field``, if provided.
     """
     if isinstance(reference_data, gpd.GeoDataFrame):
         gdf = reference_data.copy()
@@ -700,13 +678,29 @@ def _extract_reference_and_map_labels(
             f"Reference class field {class_field!r} not found. Available columns: {list(gdf.columns)}"
         )
 
-    if stability_col is not None:
-        if stability_col not in gdf.columns:
+    discovered_names: dict[int, str] = {}
+    if class_name_field is not None:
+        if class_name_field not in gdf.columns:
             raise ValueError(
-                f"Stability column {stability_col!r} not found in reference data. "
+                f"Class name field {class_name_field!r} not found. Available columns: {list(gdf.columns)}"
+            )
+        valid_pairs = gdf[[class_field, class_name_field]].dropna().drop_duplicates()
+        for _, r in valid_pairs.iterrows():
+            try:
+                cid = int(r[class_field])
+                cname = str(r[class_name_field]).strip()
+                if cid not in discovered_names and cname:
+                    discovered_names[cid] = cname
+            except (ValueError, TypeError):
+                continue
+
+    if filter_col is not None:
+        if filter_col not in gdf.columns:
+            raise ValueError(
+                f"Filter column {filter_col!r} not found in reference data. "
                 f"Available columns: {list(gdf.columns)}"
             )
-        gdf = gdf[gdf[stability_col] == stability_val].copy()
+        gdf = gdf[gdf[filter_col] == filter_val].copy()
 
     gdf = gdf[gdf.geometry.notnull() & ~gdf.geometry.is_empty & gdf[class_field].notna()].copy()
     if len(gdf) == 0:
@@ -752,7 +746,7 @@ def _extract_reference_and_map_labels(
             gdf["ref_class"] = gdf[class_field].astype(int)
             gdf["map_class"] = preds
             gdf = gdf[valid_rows].copy()
-            return gdf.reset_index(drop=True)
+            return gdf.reset_index(drop=True), discovered_names
 
         # Polygon handling ('majority' or 'all_pixels')
         records: list[dict[str, Any]] = []
@@ -809,19 +803,19 @@ def _extract_reference_and_map_labels(
         if not records:
             raise ValueError("No valid raster pixels overlapped the reference geometries.")
 
-        return gpd.GeoDataFrame(records, crs=gdf.crs).reset_index(drop=True)
+        return gpd.GeoDataFrame(records, crs=gdf.crs).reset_index(drop=True), discovered_names
 
 
 def assess_map_accuracy(
     raster_path: PathType,
     reference_data: PathType | gpd.GeoDataFrame,
-    class_field: str = "new_id",
+    class_field: str = "class_id",
     *,
+    class_name_field: str | None = None,
     class_names: Mapping[int, str] | None = None,
     labels: Sequence[int] | None = None,
-    stability_col: str | None = None,
-    stability_val: int | float = 1,
-    merge_water_riverbed: bool = True,
+    filter_col: str | None = None,
+    filter_val: Any = 1,
     class_remap: Mapping[int, int] | None = None,
     compute_area_adjustment: bool = True,
     polygon_mode: str = "majority",
@@ -836,35 +830,35 @@ def assess_map_accuracy(
     Parameters
     ----------
     raster_path : str or PathLike
-        Path to the classified single-band thematic GeoTIFF (Landsat 30m or Sentinel-2 10m).
+        Path to the classified single-band thematic GeoTIFF.
     reference_data : str, PathLike, or GeoDataFrame
         Path to the testing/validation GeoJSON, Shapefile, or GeoDataFrame.
-    class_field : str, default 'new_id'
-        Column name in ``reference_data`` containing the ground-truth class IDs.
+    class_field : str, default 'class_id'
+        Column name in ``reference_data`` containing the ground-truth integer class IDs.
+    class_name_field : str or None
+        Optional column name in ``reference_data`` containing the ground-truth human-readable
+        class names (e.g. 'class_name', 'label', 'new_class'). When provided and ``class_names``
+        is omitted, class names are automatically extracted from this column!
     class_names : Mapping[int, str] or None
-        Optional mapping of ``{class_id: class_name}``. Defaults to the Timor-Leste
-        17/18-class schema when omitted.
+        Optional dictionary mapping ``{class_id: class_name}``. If both ``class_names`` and
+        ``class_name_field`` are omitted, class names default to ``Class_<id>``.
     labels : sequence of int or None
         Explicit list of class IDs to include.
-    stability_col : str or None
-        Optional CCDC stability flag attribute for multi-temporal validation
-        (e.g., ``'stable_2020'``, ``'stable_2015'``, ``'stable_2005'``, ``'stable_2025'``).
-        When provided, filters the GeoJSON to rows where ``stability_col == stability_val``.
-    stability_val : int or float, default 1
-        Target value for ``stability_col``.
-    merge_water_riverbed : bool, default True
-        If True, automatically merges Class 18 (``Dry_riverbed``) into Class 17 (``Waterbody``)
-        in both the reference data and raster counts.
+    filter_col : str or None
+        Optional column name used to filter reference samples (e.g. 'stable_2020',
+        'stable_2015', 'split', 'is_valid').
+    filter_val : Any, default 1
+        Target value for ``filter_col``.
     class_remap : Mapping[int, int] or None
-        Additional custom class ID remapping.
+        Optional custom class ID remapping (e.g. {old_id: new_id}).
     compute_area_adjustment : bool, default True
         If True, streams the classified raster in blocks to count mapped pixels per class
         and computes AcATaMa / Olofsson et al. (2014) area-weighted accuracies, error-adjusted
-        area (ha and km²), standard errors (SE), 95% confidence intervals (CI), and CV.
+        area (ha and km²), standard errors (SE), confidence intervals (CI), and CV.
     polygon_mode : {'majority', 'all_pixels', 'centroid'}, default 'majority'
         How polygon geometries in ``reference_data`` are sampled (ignored for Point geometries).
     confidence_level : float, default 0.95
-        Confidence level for standard-error intervals (default 95%, z = 1.96).
+        Confidence level for standard-error intervals (default 0.95, z = 1.96).
     nodata_values : sequence of numbers, default (0, -1, 255)
         Pixel values treated as background / nodata.
     block_size : int, default 2048
@@ -879,22 +873,24 @@ def assess_map_accuracy(
     -------
     ThematicAccuracyResult
     """
-    sampled_gdf = _extract_reference_and_map_labels(
+    sampled_gdf, discovered_names = _extract_reference_and_map_labels(
         raster_path=raster_path,
         reference_data=reference_data,
         class_field=class_field,
-        stability_col=stability_col,
-        stability_val=stability_val,
+        class_name_field=class_name_field,
+        filter_col=filter_col,
+        filter_val=filter_val,
         polygon_mode=polygon_mode,
         nodata_values=nodata_values,
     )
 
-    remap: dict[int, int] = {}
-    if merge_water_riverbed:
-        remap[18] = 17
-    if class_remap:
-        for k, v in class_remap.items():
-            remap[int(k)] = int(v)
+    resolved_class_names: dict[int, str] = {}
+    if discovered_names:
+        resolved_class_names.update(discovered_names)
+    if class_names:
+        resolved_class_names.update({int(k): str(v) for k, v in class_names.items()})
+
+    remap = {int(k): int(v) for k, v in class_remap.items()} if class_remap else {}
 
     if remap:
         sampled_gdf["ref_class"] = sampled_gdf["ref_class"].replace(remap)
@@ -915,12 +911,11 @@ def assess_map_accuracy(
     result = compute_thematic_accuracy(
         y_true=sampled_gdf["ref_class"].to_numpy(),
         y_pred=sampled_gdf["map_class"].to_numpy(),
-        class_names=class_names,
+        class_names=resolved_class_names if resolved_class_names else None,
         labels=labels,
         mapped_pixel_counts=mapped_counts,
         pixel_area_m2=pixel_area_m2,
         confidence_level=confidence_level,
-        merge_water_riverbed=merge_water_riverbed,
         class_remap=class_remap,
     )
     result.sampled_points = sampled_gdf

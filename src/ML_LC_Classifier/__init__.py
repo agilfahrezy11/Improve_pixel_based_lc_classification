@@ -61,12 +61,15 @@ from .classification_assembly import (
     probs_to_logits,
 )
 from .trajectory_analysis import (
+    BACKWARD_CONSISTENCY_RULES,
     DEFAULT_IMPOSSIBLE_TRANSITIONS,
     DEFAULT_TIMOR_18_CLASSES,
+    FORWARD_CONSISTENCY_RULES,
     IntervalTransitionSummary,
     MultiTemporalTrajectoryResult,
     TRAJECTORY_CLASSES,
     analyze_multi_temporal_transitions,
+    apply_bidirectional_multi_epoch_consistency,
     apply_multi_epoch_transition_consistency,
     export_multi_epoch_sankey,
 )
@@ -77,7 +80,6 @@ from .seam_healing import (
     heal_raster_seams,
 )
 from .accuracy_assessment import (
-    DEFAULT_TIMOR_17_SCHEMA,
     ThematicAccuracyResult,
     assess_map_accuracy,
     compute_thematic_accuracy,
@@ -85,7 +87,6 @@ from .accuracy_assessment import (
 )
 
 __all__ = [
-    "DEFAULT_TIMOR_17_SCHEMA",
     "ThematicAccuracyResult",
     "assess_map_accuracy",
     "compute_thematic_accuracy",
@@ -94,6 +95,9 @@ __all__ = [
     "heal_array_seams",
     "heal_probability_seams",
     "heal_probability_array_spikes",
+    "apply_bidirectional_multi_epoch_consistency",
+    "FORWARD_CONSISTENCY_RULES",
+    "BACKWARD_CONSISTENCY_RULES",
     "analyze_multi_temporal_transitions",
     "apply_multi_epoch_transition_consistency",
     "export_multi_epoch_sankey",
