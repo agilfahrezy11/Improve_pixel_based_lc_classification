@@ -150,9 +150,8 @@ The true area of class $j$ is estimated from the marginal column proportions:
 $$\hat{A}_j = A_{total} \cdot \sum_{i=1}^{K} p_{ij}$$
 
 #### 4. Standard Error & 95% Confidence Intervals
-$$S(\hat{A}_j) = A_{total} \cdot \sqrt{\sum_{i=1}^{K} W_i^2 \cdot \frac{n_{ij}}{n_{i.}} \cdot \left(1 - \frac{n_{ij}}{n_{i.}}\right) \cdot \frac{1}{n_{i.} - 1}}$$
-
-$$\text{CI}_{95\%} = \hat{A}_j \pm 1.96 \cdot S(\hat{A}_j)$$
+$$S(\hat{A}_j) = A_{\text{total}} \cdot \sqrt{\sum_{i=1}^{K} W_i^2 \cdot \frac{n_{ij}}{n_{i\cdot}} \cdot \left(1 - \frac{n_{ij}}{n_{i\cdot}}\right) \cdot \frac{1}{n_{i\cdot} - 1}}$$
+$$\text{CI}_{95} = \hat{A}_j \pm 1.96 \cdot S(\hat{A}_j)$$
 
 ---
 
