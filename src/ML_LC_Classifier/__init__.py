@@ -1,8 +1,11 @@
-"""Reusable pixel based classification pipeline for land cover mapping tasks"""
+"""Reusable pixel-based classification & hybrid post-processing pipeline."""
 
+import warnings
+
+# Core ML and Post-Processing modules
 from .classify_raster import classify_raster
-from .distance_features import create_distance_features
 from .feature_stack import FeatureStackResult, create_feature_stack
+from .core_types import DownloadedAsset
 from .lc_post_process import (
     DEFAULT_HYBRID_MMU_TABLE,
     DEFAULT_TIMOR_17_CLASSES,
@@ -13,18 +16,7 @@ from .lc_post_process import (
     calculate_class_area,
     calculate_transition_matrix,
 )
-from .raster_mosaic_stack import mosaic_rasters, stack_rasters
 from .feature_elimination import FeatureSelectionResult, select_features
-from .outlier_detection import (
-    detect_outliers_per_class,
-    detect_point_outliers,
-    flag_outliers_in_vector,
-    load_points,
-    remove_outliers,
-    remove_outliers_from_vector,
-    save_cleaned_points,
-    save_flagged_points,
-)
 from .load_extract import (
     class_distribution,
     drop_nan_samples,
@@ -43,13 +35,6 @@ from .tune_model import (
     build_classifier,
     evaluate_model,
     tune_model,
-)
-from .planetary_computer import (
-    DownloadedAsset,
-    ImagerySearchResult,
-    download_imagery,
-    preview_imagery,
-    search_imagery,
 )
 from .hybrid_assembly import MaskRule, process_tile, refine_lulc_with_mask_layer
 from .classification_assembly import (
@@ -86,6 +71,41 @@ from .accuracy_assessment import (
     count_raster_pixels_streaming,
 )
 
+
+# Backward-compatible lazy loaders for modules moved to experimental/
+def __getattr__(name: str):
+    experimental_modules = {
+        "create_distance_features": "distance_features",
+        "mosaic_rasters": "raster_mosaic_stack",
+        "stack_rasters": "raster_mosaic_stack",
+        "detect_outliers_per_class": "outlier_detection",
+        "detect_point_outliers": "outlier_detection",
+        "flag_outliers_in_vector": "outlier_detection",
+        "load_points": "outlier_detection",
+        "remove_outliers": "outlier_detection",
+        "remove_outliers_from_vector": "outlier_detection",
+        "save_cleaned_points": "outlier_detection",
+        "save_flagged_points": "outlier_detection",
+        "ImagerySearchResult": "planetary_computer",
+        "download_imagery": "planetary_computer",
+        "preview_imagery": "planetary_computer",
+        "search_imagery": "planetary_computer",
+    }
+    if name in experimental_modules:
+        mod_name = experimental_modules[name]
+        warnings.warn(
+            f"'{name}' has been moved to the 'experimental' package and will be "
+            f"deprecated from top-level 'ML_LC_Classifier' in a future release. "
+            f"Import it via 'ML_LC_Classifier.experimental.{mod_name}' instead.",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
+        import importlib
+        mod = importlib.import_module(f"{__name__}.experimental.{mod_name}")
+        return getattr(mod, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
 __all__ = [
     "ThematicAccuracyResult",
     "assess_map_accuracy",
@@ -95,9 +115,9 @@ __all__ = [
     "heal_array_seams",
     "heal_probability_seams",
     "heal_probability_array_spikes",
-    "apply_bidirectional_multi_epoch_consistency",
-    "FORWARD_CONSISTENCY_RULES",
-    "BACKWARD_CONSISTENCY_RULES",
+    "apply_bidirectional_multi_epoch_consistency",
+    "FORWARD_CONSISTENCY_RULES",
+    "BACKWARD_CONSISTENCY_RULES",
     "analyze_multi_temporal_transitions",
     "apply_multi_epoch_transition_consistency",
     "export_multi_epoch_sankey",
