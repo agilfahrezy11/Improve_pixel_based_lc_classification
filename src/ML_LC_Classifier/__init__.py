@@ -3,7 +3,7 @@
 import warnings
 
 # Core ML and Post-Processing modules
-from .classify_raster import classify_raster
+from .classify_raster import classify_raster, classify_raster_proba, validate_feature_stack_manifest
 from .feature_stack import FeatureStackResult, create_feature_stack
 from .core_types import DownloadedAsset
 from .lc_post_process import (
@@ -145,6 +145,8 @@ __all__ = [
     "TransitionRule",
     "class_distribution",
     "classify_raster",
+    "classify_raster_proba",
+    "validate_feature_stack_manifest",
     "create_distance_features",
     "create_feature_stack",
     "mosaic_rasters",
