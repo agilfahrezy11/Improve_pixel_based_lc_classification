@@ -4,6 +4,25 @@ A specialized geospatial Python toolkit for **Hybrid Pixel-Object Land Cover Ass
 
 ---
 
+## 🔗 Companion Repositories & Upstream Pipeline
+
+This repository acts as the local post-processing, spatial assembly, and validation engine for land cover workflows. 
+
+For continuous time series analysis, satellite image preprocessing, and superpixel segmentation in Google Earth Engine, see the companion repository:
+
+👉 **[agilfahrezy11/Temporal_segment_gee](https://github.com/agilfahrezy11/Temporal_segment_gee)**  
+*Implementation and source code for continuous change detection and classification (CCDC) and SNIC segmentation in Google Earth Engine.*
+
+---
+
+## 📖 Methodology Overview
+
+For a comprehensive explanation of the algorithms, statistical foundations, and mathematical formulations, please see our dedicated methodology documentation:
+
+- 📄 **[Methodology Guide (`docs/METHODOLOGY.md`)](docs/METHODOLOGY.md)**: Detailed breakdown of the Bayesian blending, spatial stability metrics, morphological MMU filtering, multi-epoch trajectory analysis, and Olofsson area-adjusted accuracy assessment.
+
+---
+
 ## 🌟 Key Capabilities
 
 ### 1. Primary Workflow: Hybrid Pixel-Object Post-Processing & Refinement
@@ -27,6 +46,7 @@ Designed to ingest multi-band class probability rasters and superpixel segmentat
 - Euclidean distance raster generators (`distance_features.py`)
 - Raster mosaic & stacking utilities (`raster_mosaic_stack.py`)
 - Training sample point outlier detection (`outlier_detection.py`)
+- Archival GEE JavaScript scripts (`experimental/javascript/`)
 
 ---
 
@@ -119,4 +139,4 @@ export_multi_epoch_sankey(results, "sankey.html")
 ```bash
 pytest
 ```
-All 30 unit tests run in <5 seconds.
+All 37 unit tests run in <3 seconds.
