@@ -1,29 +1,29 @@
 # Hybrid Pixel-Object Land Cover Classification & Post-Processing
 
-A specialized geospatial Python toolkit for **Hybrid Pixel-Object Land Cover Assembly**, spatial post-processing, and multi-temporal trajectory analysis, alongside a complete end-to-end machine learning classification pipeline.
+A specialized geospatial Python toolkit for **Hybrid Pixel-Object Land Cover Assembly**, post-processing, and multi-temporal trajectory analysis, alongside a complete end-to-end machine learning classification pipeline. 
 
 ---
 
-## 🔗 Companion Repositories & Upstream Pipeline
+##  Companion Repositories & Upstream Pipeline
 
 This repository acts as the local post-processing, spatial assembly, and validation engine for land cover workflows. 
 
 For continuous time series analysis, satellite image preprocessing, and superpixel segmentation in Google Earth Engine, see the companion repository:
 
-👉 **[agilfahrezy11/Temporal_segment_gee](https://github.com/agilfahrezy11/Temporal_segment_gee)**  
+ **[agilfahrezy11/Temporal_segment_gee](https://github.com/agilfahrezy11/Temporal_segment_gee)**  
 *Implementation and source code for continuous change detection and classification (CCDC) and SNIC segmentation in Google Earth Engine.*
 
 ---
 
-## 📖 Methodology Overview
+## Methodology Overview
 
 For a comprehensive explanation of the algorithms, statistical foundations, and mathematical formulations, please see our dedicated methodology documentation:
 
-- 📄 **[Methodology Guide (`docs/METHODOLOGY.md`)](docs/METHODOLOGY.md)**: Detailed breakdown of the Bayesian blending, spatial stability metrics, morphological MMU filtering, multi-epoch trajectory analysis, and Olofsson area-adjusted accuracy assessment.
+-  **[Methodology (`docs/METHODOLOGY.md`)](docs/METHODOLOGY.md)**: Detailed breakdown of the Bayesian blending, spatial stability metrics, morphological MMU filtering, multi-epoch trajectory analysis, and area-adjusted accuracy assessment.
 
 ---
 
-## 🌟 Key Capabilities
+## Key Capabilities
 
 ### 1. Primary Workflow: Hybrid Pixel-Object Post-Processing & Refinement
 Designed to ingest multi-band class probability rasters and superpixel segmentation masks (e.g. SNIC from Google Earth Engine or local SLIC):
@@ -50,7 +50,7 @@ Designed to ingest multi-band class probability rasters and superpixel segmentat
 
 ---
 
-## 📦 Installation
+## Installation
 
 ```bash
 git clone https://github.com/AgilAkbarFahrezi/Improve_pixel_based_lc_classification.git
@@ -75,7 +75,7 @@ python -m pip install -e ".[all]"
 
 ---
 
-## 🚀 Quick Start Examples
+## Quick Start Examples
 
 ### Hybrid Pixel-Object Processing
 ```python
@@ -134,7 +134,7 @@ export_multi_epoch_sankey(results, "sankey.html")
 
 ---
 
-## 🧪 Running Tests
+## Running Tests
 
 ```bash
 pytest

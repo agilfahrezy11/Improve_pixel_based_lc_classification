@@ -1,12 +1,12 @@
 # Methodology Guide: Hybrid Pixel-Object Land Cover Post-Processing & Validation
 
-This document describes the methodological framework, mathematical formulations, and spatial decision logic implemented across the `ml-lc-classifier` toolkit.
+This document describes the methodological framework, mathematical formulations, and spatial decision logic implemented across the `ml-lc-classifier` toolkit, namely the hybrid-pixel object classification assembly.
 
 ---
 
 ## 1. Architectural Overview & Workflow Chain
 
-The system operates on an asymmetric hybrid model where **per-pixel machine learning classifiers** capture subtle spectral signatures across feature stacks, while **superpixel object segmentations** constrain high-frequency spatial noise (salt-and-pepper artifacts) and reinforce contextual boundaries.
+The system operates on an asymmetric hybrid model where **pixel-based machine learning classifiers** capture subtle spectral signatures across feature stacks, while **object segmentations** constrain high-frequency spatial noise (salt-and-pepper artifacts) and reinforce contextual boundaries.
 
 ```
 +-------------------------------------------------------------------------+
@@ -150,7 +150,7 @@ The true area of class $j$ is estimated from the marginal column proportions:
 $$\hat{A}_j = A_{total} \cdot \sum_{i=1}^{K} p_{ij}$$
 
 #### 4. Standard Error & 95% Confidence Intervals
-$$S(\hat{A}_j) = A_{total} \cdot \sqrt{\sum_{i=1}^{K} W_i^2 \cdot \frac{\frac{n_{ij}}{n_{i.}} \left(1 - \frac{n_{ij}}{n_{i.}}\right)}{n_{i.} - 1}}$$
+$$S(\hat{A}_j) = A_{total} \cdot \sqrt{\sum_{i=1}^{K} W_i^2 \cdot \frac{n_{ij}}{n_{i.}} \cdot \left(1 - \frac{n_{ij}}{n_{i.}}\right) \cdot \frac{1}{n_{i.} - 1}}$$
 
 $$\text{CI}_{95\%} = \hat{A}_j \pm 1.96 \cdot S(\hat{A}_j)$$
 
@@ -162,3 +162,5 @@ $$\text{CI}_{95\%} = \hat{A}_j \pm 1.96 \cdot S(\hat{A}_j)$$
 2. **Olofsson, P., Foody, G. M., Herold, M., Stehman, S. V., Woodcock, C. E., & Wulder, M. A. (2014).** *Good practices for estimating area and assessing accuracy of land change.* Remote Sensing of Environment, 148, 42-57.
 3. **Pontius Jr, R. G., Shusas, E., & McEachern, M. (2004).** *Detecting important categorical land changes while accounting for persistence.* Agriculture, Ecosystems & Environment, 101(2-3), 251-268.
 4. **Stehman, S. V. (2014).** *Estimating area and map accuracy for stratified random sampling when the strata are different from the map classes.* International Journal of Remote Sensing, 35(13), 4923-4939.
+5. **Malinverni, Eva S., Sanità, M. (2026).** *A Hybrid Pixel–Object–Rule-Based Classification Framework with Stability Maps for Large-Scale LULC Mapping.*
+ISPRS International Journal of Geo-Information, 15(6), 241.
