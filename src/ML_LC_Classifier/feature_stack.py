@@ -18,7 +18,7 @@ from rasterio.transform import array_bounds, from_bounds
 from rasterio.vrt import WarpedVRT
 from rasterio.warp import transform_bounds
 from rasterio.windows import Window
-from .planetary_computer import DownloadedAsset
+from .core_types import DownloadedAsset
 
 
 @dataclass(frozen=True)

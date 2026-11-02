@@ -2,7 +2,7 @@
  * Module: Sentinel-2 CCDC Temporal Segmentation & Synthetic Stack Generator
  * Description: Prepares Sentinel-2 Surface Reflectance time series using Cloud Score+, 
  *              executes CCDC temporal segmentation, and evaluates harmonic coefficients 
- *              to generate synthetic predictor stacks for classification.
+ *              to generate synthetic predictor stacks for classification with gap tolerance.
  */
 
 /**
@@ -66,7 +66,6 @@ exports.getS2TimeSeries = function(roi, startDate, endDate, clearThreshold, qaBa
   });
 };
 
-
 /**
  * 3. Run CCDC Algorithm
  * Wraps ee.Algorithms.TemporalSegmentation.Ccdc with sensible defaults.
@@ -93,62 +92,106 @@ exports.runCCDC = function(s2Collection, options) {
 };
 
 /**
- * 4. Generate Synthetic Predictor Stack for a Single Date
- * Evaluates CCDC harmonic regression coefficients at target fractional year t:
- * y(t) = c0 + c1*t + a1*cos(2pi*t) + b1*sin(2pi*t)
+ * 4. Nearest segment in time per pixel (index, temporal gap in years, tStart, tEnd).
+ * Returns gap = 0 if targetDateFractional t is strictly inside an active segment.
+ *
+ * @param {ee.Image} ccdc - CCDC array image containing tStart and tEnd.
+ * @param {number|ee.Number} t - Target fractional year (e.g., 2025.65).
+ * @returns {Object} {idx, gap, tS, tE}
+ */
+exports.nearestSegment = function(ccdc, t) {
+  t = ee.Number(t);
+  var tS = ccdc.select('tStart');
+  var tE = ccdc.select('tEnd');
+  var dist = tS.subtract(t).max(tE.multiply(-1).add(t)).max(0); // 0 if inside a segment
+  return {
+    idx: dist.multiply(-1).arrayArgmax().arrayGet([0]),
+    gap: dist.arrayReduce(ee.Reducer.min(), [0]).arrayGet([0]).rename('gap_years'),
+    tS: tS,
+    tE: tE
+  };
+};
+
+/**
+ * 5. Fill isolated nodata holes from 3x3 focal median, only where enough neighbors are valid.
+ *
+ * @param {ee.Image} img - Image with potential isolated nodata holes.
+ * @param {number} [minNeighbors=5] - Minimum valid neighbors in 3x3 window (out of 8).
+ * @returns {ee.Image} Gap-filled image.
+ */
+exports.fillIsolated = function(img, minNeighbors) {
+  minNeighbors = minNeighbors !== undefined ? minNeighbors : 5;
+  var n = img.select(0).mask().reduceNeighborhood({
+    reducer: ee.Reducer.sum(),
+    kernel: ee.Kernel.square(1)
+  });
+  var med = img.focalMedian(1, 'square', 'pixels');
+  return img.unmask(med.updateMask(n.gte(minNeighbors)));
+};
+
+/**
+ * 6. Generate Synthetic Predictor Stack for a Single Date with Gap Tolerance
+ * Evaluates CCDC harmonic regression coefficients at target fractional year t.
+ * Uses the nearest segment in time with a configurable gap tolerance (tolYears).
+ * Clamps the linear trend term to the segment bounds while preserving seasonal harmonics.
  *
  * @param {ee.Image} ccdcOutput - Output image from runCCDC.
- * @param {number|ee.Number} targetDateFractional - Date in fractional year (e.g., 2025.5 for July 1, 2025).
- * @param {Array<string>} [bands] - Spectral band names matching CCDC outputs.
- * @param {boolean} [addIndices=true] - Whether to compute spectral indices (NDVI, NDWI, NDBI).
+ * @param {number|ee.Number} targetDateFractional - Date in fractional year (e.g., 2025.65).
+ * @param {Array<string>|boolean} [bands] - Spectral band names matching CCDC outputs, OR boolean addIndices.
+ * @param {boolean|number} [addIndices=true] - Whether to compute spectral indices (NDVI, NDWI, NDBI), OR tolYears.
+ * @param {number} [coefficientScale=10000] - Scale of CCDC coefficients (default 10000).
+ * @param {number} [tolYears=1.0] - Maximum gap in years to nearest valid segment (default 1.0).
  * @returns {ee.Image} Synthetic surface reflectance stack with indices.
  */
-exports.getSyntheticStack = function(ccdcOutput, targetDateFractional, bands, addIndices) {
-  bands = bands || ['blue', 'green', 'red', 're1','re2', 'nir', 'swir1', 'swir2'];
-  addIndices = addIndices !== undefined ? addIndices : true;
+exports.getSyntheticStack = function(ccdcOutput, targetDateFractional, bands, addIndices, coefficientScale, tolYears) {
+  if (typeof bands === 'boolean') {
+    var _addIndices = bands;
+    var _tolYears = addIndices !== undefined ? addIndices : 1.0;
+    var _coefScale = coefficientScale !== undefined ? coefficientScale : 10000;
+    tolYears = _tolYears;
+    coefficientScale = _coefScale;
+    addIndices = _addIndices;
+    bands = ['blue', 'green', 'red', 're1','re2', 'nir', 'swir1', 'swir2'];
+  } else {
+    bands = bands || ['blue', 'green', 'red', 're1','re2', 'nir', 'swir1', 'swir2'];
+    addIndices = addIndices !== undefined ? addIndices : true;
+    coefficientScale = coefficientScale !== undefined ? coefficientScale : 10000;
+    tolYears = tolYears !== undefined ? tolYears : 1.0;
+  }
 
   var t = ee.Number(targetDateFractional);
-  var tStart = ccdcOutput.select('tStart');
-  var tEnd = ccdcOutput.select('tEnd');
+  var seg = exports.nearestSegment(ccdcOutput, t);
 
-  // 1. Create dynamic segment boolean mask (1D: [num_segments])
-  var segmentMask = tStart.lte(t).and(tEnd.gte(t));
-  
-  // FIX: Convert 1D mask [num_segments] to 2D array mask [num_segments, 1]
-  var segmentMask2D = segmentMask.toArray(0).toArray(1);
-
-  // 2. Build harmonic vector [8 x 1]
+  // Clamp only the trend term; harmonics keep the target date's season
+  var tc = ee.Image(t).max(seg.tS.arrayGet(seg.idx)).min(seg.tE.arrayGet(seg.idx));
   var omega = 2.0 * Math.PI;
-  var termList = [
+  var terms = ee.Image.cat([
     ee.Image.constant(1),
-    ee.Image.constant(t),
+    tc,
     ee.Image.constant(t.multiply(omega).cos()),
     ee.Image.constant(t.multiply(omega).sin()),
     ee.Image.constant(t.multiply(omega * 2).cos()),
     ee.Image.constant(t.multiply(omega * 2).sin()),
     ee.Image.constant(t.multiply(omega * 3).cos()),
     ee.Image.constant(t.multiply(omega * 3).sin())
-  ];
-  var termsArray = ee.Image(termList).toArray().toArray(1);
+  ]).toArray();
 
-  // 3. Extract coefficients and calculate synthetic fits
   var syntheticBands = bands.map(function(band) {
-    var coefs = ccdcOutput.select(band + '_coefs'); // shape: [num_segments, 8]
+    var coefs = ccdcOutput.select(band + '_coefs')
+      .arraySlice(0, seg.idx, seg.idx.add(1))
+      .arrayProject([1]);
     
-    // Apply 2D mask along segment dimension
-    var activeCoefs = coefs.arrayMask(segmentMask2D);
-    
-    // Slice active segment (shape: [1, 8])
-    var segCoefs = activeCoefs.arraySlice(0, 0, 1);
-    
-    // Matrix multiplication: [1 x 8] * [8 x 1] = [1 x 1]
-    var fitArray = segCoefs.matrixMultiply(termsArray);
-    
-    // Project and flatten array to scalar image, then scale down 10,000 -> 0..1
-    return fitArray.arrayProject([0]).arrayFlatten([[band]]).divide(10000);
+    return coefs.multiply(terms).arrayReduce(ee.Reducer.sum(), [0])
+      .arrayGet([0]).divide(coefficientScale).rename(band);
   });
 
-  var stack = ee.Image(syntheticBands);
+  var stack = ee.Image.cat(syntheticBands);
+
+  // Plausibility bounds: within tolerance and valid reflectance
+  var valid = seg.gap.lte(tolYears)
+    .and(stack.reduce(ee.Reducer.min()).gt(-0.05))
+    .and(stack.reduce(ee.Reducer.max()).lt(1.5));
+  stack = exports.fillIsolated(stack.updateMask(valid), 5);
 
   if (addIndices) {
     var ndvi = stack.normalizedDifference(['nir', 'red']).rename('NDVI');
@@ -158,10 +201,10 @@ exports.getSyntheticStack = function(ccdcOutput, targetDateFractional, bands, ad
   }
 
   return stack;
-
 };
+
 /**
- * 5. Multi-Year Synthetic Stack Generator
+ * 7. Multi-Year Synthetic Stack Generator
  * Generates a dictionary of synthetic stacks for multiple target years.
  *
  * @param {ee.Image} ccdcOutput - Output image from runCCDC.
@@ -169,21 +212,25 @@ exports.getSyntheticStack = function(ccdcOutput, targetDateFractional, bands, ad
  * @param {number} [fractionOfYear=0.5] - Day of year fraction (e.g., 0.5 = ~July 1 dry season).
  * @param {Array<string>} [bands] - Spectral band list.
  * @param {boolean} [addIndices=true] - Whether to compute indices.
+ * @param {number} [coefficientScale=10000] - CCDC coefficient scale.
+ * @param {number} [tolYears=1.0] - Maximum gap in years to nearest valid segment.
  * @returns {Object} Map with year keys pointing to ee.Image synthetic stacks.
  */
-exports.getMultiYearSyntheticStacks = function(ccdcOutput, yearsList, fractionOfYear, bands, addIndices) {
+exports.getMultiYearSyntheticStacks = function(ccdcOutput, yearsList, fractionOfYear, bands, addIndices, coefficientScale, tolYears) {
   fractionOfYear = fractionOfYear !== undefined ? fractionOfYear : 0.5;
+  tolYears = tolYears !== undefined ? tolYears : 1.0;
   
   var stacks = {};
   yearsList.forEach(function(year) {
     var targetT = ee.Number(year).add(fractionOfYear);
-    stacks[year] = exports.getSyntheticStack(ccdcOutput, targetT, bands, addIndices);
+    stacks[year] = exports.getSyntheticStack(ccdcOutput, targetT, bands, addIndices, coefficientScale, tolYears);
   });
 
   return stacks;
 };
+
 /**
- * Monthly median composites from a masked S2 collection.
+ * 8. Monthly median composites from a masked S2 collection.
  * Months with no valid observations are dropped.
  * Timestamp is set to mid-month so CCDC sees one observation per month.
  */

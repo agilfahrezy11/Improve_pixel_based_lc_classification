@@ -13,7 +13,7 @@ More algorithms can be added by passing a scikit-learn compatible estimator to t
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, cast
 import numpy as np
-from lightgbm import LGBMClassifier #LIGHT gradient boosting machine
+# lightgbm imported lazily in build_classifier
 from sklearn.base import BaseEstimator
 from sklearn.ensemble import ExtraTreesClassifier, RandomForestClassifier 
 from sklearn.metrics import accuracy_score,balanced_accuracy_score,classification_report,confusion_matrix,f1_score
@@ -49,6 +49,13 @@ def build_classifier(
 			) from error
 		return XGBClassifier(random_state=random_state, n_jobs=n_jobs)
 	if name in {"lightgbm", "lgbm"}:
+		try:
+			from lightgbm import LGBMClassifier
+		except ImportError as error:
+			raise ImportError(
+				"LightGBM support requires the optional dependency: pip install "
+				"ml-lc-classifier[boosting]"
+			) from error
 		return cast(
 			BaseEstimator,
 			LGBMClassifier(random_state=random_state, n_jobs=n_jobs, verbosity=-1),

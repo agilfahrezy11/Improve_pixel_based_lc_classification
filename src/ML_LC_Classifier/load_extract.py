@@ -169,13 +169,17 @@ def load_and_extract(
     closing the raster dataset when done (or use it as a context manager).
     """
     dataset = open_raster(raster_path)
-    samples = load_training_samples(shapefile_path)
-    if samples.crs is not None and dataset.crs is not None and samples.crs != dataset.crs:
-        samples = samples.to_crs(dataset.crs)
+    try:
+        samples = load_training_samples(shapefile_path)
+        if samples.crs is not None and dataset.crs is not None and samples.crs != dataset.crs:
+            samples = samples.to_crs(dataset.crs)
 
-    features, labels = extract_pixels_from_shapefile(samples, dataset, class_field)
-    features, labels = drop_nan_samples(features, labels)
-    return dataset, features, labels
+        features, labels = extract_pixels_from_shapefile(samples, dataset, class_field)
+        features, labels = drop_nan_samples(features, labels)
+        return dataset, features, labels
+    except Exception:
+        dataset.close()
+        raise
 
 
 def load_and_extract_points(

@@ -87,6 +87,25 @@ MERGE_WATER_RIVERBED = True # Merge class 18 into 17 post-classification
 # =============================================================================
 # 2. GENERIC MASK-BASED REFINEMENT RULE ENGINE
 # =============================================================================
+
+@dataclass(frozen=True)
+class ProcessTileResult:
+    """Result paths from hybrid pixel-object classification processing."""
+    lulc: Path
+    stability: Path
+    ci: Path
+
+    def __getitem__(self, key: str) -> Path:
+        # Backward compatibility for dictionary-style access result['lulc']
+        if key in ("lulc", "stability", "ci"):
+            return getattr(self, key)
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
 @dataclass
 class MaskRule:
     """
@@ -643,8 +662,8 @@ def process_tile(
     print(f"  2. Stability Map:   {stab_out}")
     print(f"  3. Confusion Index: {ci_out}")
 
-    return {
-        'lulc': lulc_out,
-        'stability': stab_out,
-        'ci': ci_out
-    }
+    return ProcessTileResult(
+        lulc=lulc_out,
+        stability=stab_out,
+        ci=ci_out
+    )

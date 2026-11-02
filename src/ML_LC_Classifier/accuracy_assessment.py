@@ -50,7 +50,7 @@ PathType = str | PathLike[str]
 
 @dataclass
 class ThematicAccuracyResult:
-    """Container for thematic accuracy assessment and Olofsson/AcATaMa area outputs.
+    """Container for thematic accuracy assessment.
 
     Attributes
     ----------

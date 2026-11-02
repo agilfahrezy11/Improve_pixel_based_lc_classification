@@ -284,7 +284,9 @@ def _classify_pixel_trajectory_vector(
         axis=1,
     )
     if n_epochs >= 3:
-        flip_back = (u_first == u_last) & (u_traj[:, 1] != u_first)
+        # Reverted back to initial state after temporary flip
+        intermediate_diff = np.any(u_traj[:, 1:-1] != u_first[:, None], axis=1)
+        flip_back = (u_first == u_last) & intermediate_diff
         u_out[flip_back | spurious_primary_gain | spurious_urban_revert] = 9
     else:
         u_out[spurious_primary_gain | spurious_urban_revert] = 9 # type: ignore
@@ -606,20 +608,12 @@ def analyze_multi_temporal_transitions(
 
     raster_paths = [Path(epoch_rasters[yr]) for yr in sorted_years]
 
-    # Verify matching spatial profiles
+    # Verify matching spatial profiles and CRS alignment
+    from .geometry import validate_raster_alignment, compute_pixel_area_ha
+    height, width, crs, transform = validate_raster_alignment(*raster_paths)
     with rasterio.open(raster_paths[0]) as first_src:
         meta = first_src.meta.copy()
-        res_x = abs(first_src.transform.a)
-        res_y = abs(first_src.transform.e)
-        pixel_area_ha = (res_x * res_y) / 10000.0
-        height, width = first_src.height, first_src.width
-
-    for p in raster_paths[1:]:
-        with rasterio.open(p) as s:
-            if s.shape != (height, width):
-                raise ValueError(
-                    f"Dimension mismatch: {p.name} {s.shape} != base {height, width}."
-                )
+    pixel_area_ha = float(compute_pixel_area_ha(crs, transform, height))
 
     # Accumulators for sequential interval transitions
     n_intervals = len(sorted_years) - 1
