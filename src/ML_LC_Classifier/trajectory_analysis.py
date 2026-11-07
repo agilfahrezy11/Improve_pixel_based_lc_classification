@@ -304,13 +304,9 @@ DEFAULT_IMPOSSIBLE_TRANSITIONS: list[TransitionRule] = [
     (16, 2), (16, 3), (16, 4), (16, 7), (16, 8), (16, 11), (16, 12), (16, 13), (16, 14),
 ]
 
-#: 26 Forward Consistency Rules (T2 <- T1): Permanently locks Built-up (16) and suppresses false Teak (5)
+#: Forward Consistency Rules (T2 <- T1): Suppresses false Teak (5) overestimation in later epochs
 FORWARD_CONSISTENCY_RULES: list[TransitionRule] = [
-    # A. Built-up (16) permanently locked (cannot revert to vegetation/water) [15 rules]
-    (16, 1), (16, 2), (16, 3), (16, 4), (16, 5), (16, 6), (16, 7), (16, 8),
-    (16, 9), (16, 10), (16, 11), (16, 12), (16, 13), (16, 14), (16, 17),
-    
-    # B. TEAK OVERESTIMATION FIX: Non-teak cannot become Teak in later epochs [11 rules]
+    # TEAK OVERESTIMATION FIX: Non-teak cannot become Teak in later epochs [11 rules]
     (3, 5),   # Mangrove -> Teak
     (4, 5),   # Coastal Forest -> Teak
     (6, 5),   # Eucalyptus Plantation -> Teak
@@ -324,7 +320,8 @@ FORWARD_CONSISTENCY_RULES: list[TransitionRule] = [
     (17, 5),  # Waterbody -> Teak
 ]
 
-#: 70+ Backward Consistency Rules (T1 <- T2): Protects climax vegetation and cleans historical shadows/false teak
+#: Backward Consistency Rules (T1 <- T2): Protects climax vegetation, cleans historical shadows/false teak,
+#: and demotes historical Built-up commission errors where 2025 ground truth confirms vegetation/water.
 BACKWARD_CONSISTENCY_RULES: list[TransitionRule] = [
     # 1. Any non-primary -> Primary Forest (1) [16 rules]
     (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1), (9, 1),
@@ -356,6 +353,11 @@ BACKWARD_CONSISTENCY_RULES: list[TransitionRule] = [
 
     # 9. Coconut (9) into Eucalyptus / Coffee [2 rules]
     (9, 6), (9, 7),
+
+    # 10. Historical Built-up (16) commission errors -> Verified later vegetation/water [15 rules]
+    # (Trusts 2025 ground truth: earlier false urban errors revert back to vegetation/water)
+    (16, 1), (16, 2), (16, 3), (16, 4), (16, 5), (16, 6), (16, 7), (16, 8),
+    (16, 9), (16, 10), (16, 11), (16, 12), (16, 13), (16, 14), (16, 17),
 ]
 
 

@@ -9,3 +9,5 @@
 /docs/agents
 /notebooks/output
 /standalone code
+/src/ML_LC_Classifier/experimental/__pycache__
+*.pyc
