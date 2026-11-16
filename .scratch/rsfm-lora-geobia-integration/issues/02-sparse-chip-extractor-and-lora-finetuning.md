@@ -4,9 +4,9 @@
 
 **Blocked by:** 01: OpenGeoAI Backbone Loader and Windowed Custom Embedding Stack
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Passing a raster stack and vector training layer extracts fixed-size (`chip_size`, e.g. `224x224`) image chips and rasterized target masks where labeled geometries carry integer class IDs `1..K` and unlabeled pixels carry `0` (`ignore_index=0`), reprojecting vectors to the raster CRS when needed.
-- [ ] Running LoRA fine-tuning freezes the base foundation model weights, injects trainable low-rank adapter matrices (`rank`, `alpha`) plus a task classification head, and updates only the adapter and head parameters while masking loss on `ignore_index=0` pixels.
-- [ ] Saving a fine-tuned model writes a self-contained checkpoint directory/archive (adapter weights, head weights, class IDs, band/wavelength order, and per-band mean/std normalization statistics).
-- [ ] Reloading the saved checkpoint bundle reproduces identical adapted embeddings and class probability predictions on held-out test chips.
+- [x] Passing a raster stack and vector training layer extracts fixed-size (`chip_size`, e.g. `224x224`) image chips and rasterized target masks where labeled geometries carry integer class IDs `1..K` and unlabeled pixels carry `0` (`ignore_index=0`), reprojecting vectors to the raster CRS when needed.
+- [x] Running LoRA fine-tuning freezes the base foundation model weights, injects trainable low-rank adapter matrices (`rank`, `alpha`) plus a task classification head, and updates only the adapter and head parameters while masking loss on `ignore_index=0` pixels.
+- [x] Saving a fine-tuned model writes a self-contained checkpoint directory/archive (adapter weights, head weights, class IDs, band/wavelength order, and per-band mean/std normalization statistics).
+- [x] Reloading the saved checkpoint bundle reproduces identical adapted embeddings and class probability predictions on held-out test chips.

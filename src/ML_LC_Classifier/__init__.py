@@ -73,10 +73,16 @@ from .accuracy_assessment import (
 from .rsfm import (
     OpenGeoAIBackboneAdapter,
     RSFMBackbone,
+    RSFMCheckpointBundle,
+    RSFMChipDataset,
+    RSFMFineTuneResult,
     SimpleCPUBackbone,
     extract_rsfm_embeddings,
+    finetune_rsfm,
     list_opengeoai_models,
     load_opengeoai_backbone,
+    load_rsfm_checkpoint,
+    prepare_rsfm_chips,
 )
 
 
@@ -191,8 +197,14 @@ __all__ = [
     "refine_lulc_with_mask_layer",
     "OpenGeoAIBackboneAdapter",
     "RSFMBackbone",
+    "RSFMCheckpointBundle",
+    "RSFMChipDataset",
+    "RSFMFineTuneResult",
     "SimpleCPUBackbone",
     "extract_rsfm_embeddings",
+    "finetune_rsfm",
     "list_opengeoai_models",
     "load_opengeoai_backbone",
+    "load_rsfm_checkpoint",
+    "prepare_rsfm_chips",
 ]
