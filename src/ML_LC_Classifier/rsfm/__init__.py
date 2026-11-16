@@ -21,6 +21,7 @@ from .geobia import (
     project_segment_probabilities,
 )
 from .inference import infer_rsfm_probabilities
+from .stability import compute_embedding_stability, filter_disturbed_samples
 
 __all__ = [
     "OpenGeoAIBackboneAdapter",
@@ -30,7 +31,9 @@ __all__ = [
     "RSFMFineTuneResult",
     "SimpleCPUBackbone",
     "assign_segment_labels",
+    "compute_embedding_stability",
     "extract_rsfm_embeddings",
+    "filter_disturbed_samples",
     "finetune_rsfm",
     "infer_rsfm_probabilities",
     "list_opengeoai_models",
