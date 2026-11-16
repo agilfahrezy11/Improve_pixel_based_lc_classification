@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Installing the package with the optional `rsfm` extra pulls in `geoai-py`, `torch`, and `peft`, while the default installation requires none of them and continues to import cleanly on CPU-only environments.
-- [ ] Users can list and load foundation model backbones through an OpenGeoAI-backed loader or supply a lightweight deterministic CPU backbone implementing the same feature-extraction protocol.
-- [ ] Running windowed embedding extraction on a source raster slides overlapping chips weighted by a 2D Gaussian/Hann window to prevent patch-boundary seams, preserves nodata masks, and returns a `FeatureStackResult` (GeoTIFF + JSON manifest) with ordered embedding band names.
-- [ ] The resulting `FeatureStackResult` passes directly into `load_and_split_training_data` and `tune_model` in an end-to-end CPU test.
+- [x] Installing the package with the optional `rsfm` extra pulls in `geoai-py`, `torch`, and `peft`, while the default installation requires none of them and continues to import cleanly on CPU-only environments.
+- [x] Users can list and load foundation model backbones through an OpenGeoAI-backed loader or supply a lightweight deterministic CPU backbone implementing the same feature-extraction protocol.
+- [x] Running windowed embedding extraction on a source raster slides overlapping chips weighted by a 2D Gaussian/Hann window to prevent patch-boundary seams, preserves nodata masks, and returns a `FeatureStackResult` (GeoTIFF + JSON manifest) with ordered embedding band names.
+- [x] The resulting `FeatureStackResult` passes directly into `load_and_split_training_data` and `tune_model` in an end-to-end CPU test.

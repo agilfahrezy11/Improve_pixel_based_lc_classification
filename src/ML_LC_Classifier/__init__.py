@@ -70,6 +70,14 @@ from .accuracy_assessment import (
     compute_thematic_accuracy,
     count_raster_pixels_streaming,
 )
+from .rsfm import (
+    OpenGeoAIBackboneAdapter,
+    RSFMBackbone,
+    SimpleCPUBackbone,
+    extract_rsfm_embeddings,
+    list_opengeoai_models,
+    load_opengeoai_backbone,
+)
 
 
 # Backward-compatible lazy loaders for modules moved to experimental/
@@ -181,4 +189,10 @@ __all__ = [
     "MaskRule",
     "process_tile",
     "refine_lulc_with_mask_layer",
+    "OpenGeoAIBackboneAdapter",
+    "RSFMBackbone",
+    "SimpleCPUBackbone",
+    "extract_rsfm_embeddings",
+    "list_opengeoai_models",
+    "load_opengeoai_backbone",
 ]
