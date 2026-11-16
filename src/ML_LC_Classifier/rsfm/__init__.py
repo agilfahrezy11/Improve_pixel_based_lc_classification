@@ -15,6 +15,7 @@ from .finetune import (
     finetune_rsfm,
     load_rsfm_checkpoint,
 )
+from .inference import infer_rsfm_probabilities
 
 __all__ = [
     "OpenGeoAIBackboneAdapter",
@@ -25,6 +26,7 @@ __all__ = [
     "SimpleCPUBackbone",
     "extract_rsfm_embeddings",
     "finetune_rsfm",
+    "infer_rsfm_probabilities",
     "list_opengeoai_models",
     "load_opengeoai_backbone",
     "load_rsfm_checkpoint",

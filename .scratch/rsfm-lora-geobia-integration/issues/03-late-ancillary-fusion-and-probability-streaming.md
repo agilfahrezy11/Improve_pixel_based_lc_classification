@@ -4,8 +4,8 @@
 
 **Blocked by:** 01: OpenGeoAI Backbone Loader and Windowed Custom Embedding Stack, 02: Sparse-Polygon Chip Extractor and LoRA Fine-Tuning with Checkpoint Bundle
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Ancillary rasters with differing resolutions, extents, or CRS are aligned on the fly to the target streaming window using `WarpedVRT` without requiring pre-warped copies on disk.
-- [ ] During windowed inference, the $D$-dimensional RSFM embeddings and $M$ manual ancillary bands are concatenated in memory per block and passed to either the fine-tuned neural head or a fitted tabular classifier (`RandomForest` / `LightGBM` supporting `predict_proba`) to produce per-class probabilities without writing the intermediate $(D+M)$-band raster to disk.
-- [ ] The output multi-band probability GeoTIFF (`float32` or scaled `uint16`) preserves spatial metadata, class band order, and nodata masks, and passes directly into both `bayesian_smooth` and `hybrid_assembly.process_tile` in an end-to-end integration test.
+- [x] Ancillary rasters with differing resolutions, extents, or CRS are aligned on the fly to the target streaming window using `WarpedVRT` without requiring pre-warped copies on disk.
+- [x] During windowed inference, the $D$-dimensional RSFM embeddings and $M$ manual ancillary bands are concatenated in memory per block and passed to either the fine-tuned neural head or a fitted tabular classifier (`RandomForest` / `LightGBM` supporting `predict_proba`) to produce per-class probabilities without writing the intermediate $(D+M)$-band raster to disk.
+- [x] The output multi-band probability GeoTIFF (`float32` or scaled `uint16`) preserves spatial metadata, class band order, and nodata masks, and passes directly into both `bayesian_smooth` and `hybrid_assembly.process_tile` in an end-to-end integration test.
