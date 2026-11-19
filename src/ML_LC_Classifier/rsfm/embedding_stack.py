@@ -105,7 +105,7 @@ def extract_rsfm_embeddings(
             for r0, c0 in batch_coords:
                 read_h = min(chip_size, height - r0)
                 read_w = min(chip_size, width - c0)
-                win = Window(c0, r0, read_w, read_h)
+                win = Window(c0, r0, read_w, read_h) # type: ignore
                 block = src.read(window=win, masked=True)
 
                 raw = np.ma.getdata(block).astype(np.float32, copy=True)
